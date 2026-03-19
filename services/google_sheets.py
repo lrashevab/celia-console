@@ -11,10 +11,13 @@ from services.google_auth import get_sheets_service
 
 # ── 欄位定義 ─────────────────────────────────────────
 WORK_COLUMNS = {
-    "clients":  ["client_id", "name", "status", "contact", "industry", "created_date"],
-    "tasks":    ["task_id", "client", "title", "type", "status", "due_date", "owner"],
-    "todos":    ["todo_id", "type", "title", "description", "due_date", "status"],
-    "meetings": ["meeting_id", "date", "client", "title", "summary", "calendar_link"],
+    "clients":  ["id", "name", "industry", "contact", "email", "phone",
+                 "contract_status", "account_type", "monthly_value", "created_date", "notes"],
+    "tasks":    ["id", "title", "client", "type", "status", "priority",
+                 "due_date", "owner", "assigned_to", "confirmed_by_client", "notes"],
+    "todos":    ["id", "title", "client", "type", "status",
+                 "due_date", "assigned_to", "confirmed_by_client"],
+    "meetings": ["id", "date", "client", "title", "attendees", "summary", "action_items", "calendar_link"],
 }
 PERSONAL_COLUMNS = {
     "reading": ["book", "author", "pages_total", "pages_read", "start_date", "status"],
@@ -64,42 +67,58 @@ def _append_row(service, spreadsheet_id: str, sheet_name: str, row: list):
 # 工作帳號 — Work Data
 # ══════════════════════════════════════════════════════
 
-def get_clients() -> pd.DataFrame:
-    svc = get_sheets_service("work")
-    sid = ACCOUNTS["work"]["spreadsheet_id"]
-    return _read_sheet(svc, sid, WORK_SHEETS["clients"], WORK_COLUMNS["clients"])
+def get_clients(account: str = "work") -> pd.DataFrame:
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
+    df = _read_sheet(svc, sid, WORK_SHEETS["clients"], WORK_COLUMNS["clients"])
+    df["_account"] = account  # 標記來源帳號
+    return df
 
 
-def get_tasks(task_type: Optional[str] = None) -> pd.DataFrame:
-    """task_type: 'internal' | 'client' | 'external' | None（全部）"""
-    svc = get_sheets_service("work")
-    sid = ACCOUNTS["work"]["spreadsheet_id"]
+def get_tasks(task_type: Optional[str] = None, account: str = "work") -> pd.DataFrame:
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
     df = _read_sheet(svc, sid, WORK_SHEETS["tasks"], WORK_COLUMNS["tasks"])
+    df["_account"] = account
     if task_type:
         df = df[df["type"].str.lower() == task_type.lower()]
     return df
 
 
-def get_todos(todo_type: Optional[str] = None) -> pd.DataFrame:
-    svc = get_sheets_service("work")
-    sid = ACCOUNTS["work"]["spreadsheet_id"]
+def get_todos(todo_type: Optional[str] = None, account: str = "work") -> pd.DataFrame:
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
     df = _read_sheet(svc, sid, WORK_SHEETS["todos"], WORK_COLUMNS["todos"])
+    df["_account"] = account
     if todo_type:
         df = df[df["type"].str.lower() == todo_type.lower()]
     return df
 
 
-def get_meetings() -> pd.DataFrame:
-    svc = get_sheets_service("work")
-    sid = ACCOUNTS["work"]["spreadsheet_id"]
+def get_meetings(account: str = "work") -> pd.DataFrame:
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
     return _read_sheet(svc, sid, WORK_SHEETS["meetings"], WORK_COLUMNS["meetings"])
 
 
-def append_meeting(meeting_row: list):
-    """新增會議記錄"""
-    svc = get_sheets_service("work")
-    sid = ACCOUNTS["work"]["spreadsheet_id"]
+def append_meeting(meeting_row: list, account: str = "work"):
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
     _append_row(svc, sid, WORK_SHEETS["meetings"], meeting_row)
+
+
+def append_task(task_row: list, account: str = "work"):
+    """新增任務"""
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
+    _append_row(svc, sid, WORK_SHEETS["tasks"], task_row)
+
+
+def append_todo(todo_row: list, account: str = "work"):
+    """新增待辦"""
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
+    _append_row(svc, sid, WORK_SHEETS["todos"], todo_row)
 
 
 # ══════════════════════════════════════════════════════
