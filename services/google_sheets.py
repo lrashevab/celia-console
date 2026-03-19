@@ -1,0 +1,136 @@
+# -*- coding: utf-8 -*-
+"""
+services/google_sheets.py — Google Sheets 讀寫服務
+支援 work / personal 雙帳號，各自存取不同 Spreadsheet
+"""
+import pandas as pd
+from typing import Optional
+
+from config.settings import ACCOUNTS, WORK_SHEETS, PERSONAL_SHEETS
+from services.google_auth import get_sheets_service
+
+# ── 欄位定義 ─────────────────────────────────────────
+WORK_COLUMNS = {
+    "clients":  ["client_id", "name", "status", "contact", "industry", "created_date"],
+    "tasks":    ["task_id", "client", "title", "type", "status", "due_date", "owner"],
+    "todos":    ["todo_id", "type", "title", "description", "due_date", "status"],
+    "meetings": ["meeting_id", "date", "client", "title", "summary", "calendar_link"],
+}
+PERSONAL_COLUMNS = {
+    "reading": ["book", "author", "pages_total", "pages_read", "start_date", "status"],
+    "fitness": ["date", "activity", "duration_min", "notes"],
+    "habits":  ["date", "habit", "completed"],
+    "finance": ["date", "category", "type", "amount", "note"],
+    "goals":   ["goal", "category", "target_date", "progress_pct", "milestones"],
+}
+
+
+def _read_sheet(service, spreadsheet_id: str, sheet_name: str, expected_cols: list) -> pd.DataFrame:
+    """通用讀取：從指定 Sheet Tab 讀取資料為 DataFrame"""
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=sheet_name
+    ).execute()
+
+    values = result.get("values", [])
+    if not values or len(values) < 2:
+        return pd.DataFrame(columns=expected_cols)
+
+    headers = values[0]
+    rows = values[1:]
+    # 補齊欄位長度
+    rows = [r + [""] * (len(headers) - len(r)) for r in rows]
+    df = pd.DataFrame(rows, columns=headers)
+
+    # 補足缺少的欄位
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = ""
+    return df[expected_cols]
+
+
+def _append_row(service, spreadsheet_id: str, sheet_name: str, row: list):
+    """向指定 Sheet 新增一行"""
+    service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=sheet_name,
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [row]},
+    ).execute()
+
+
+# ══════════════════════════════════════════════════════
+# 工作帳號 — Work Data
+# ══════════════════════════════════════════════════════
+
+def get_clients() -> pd.DataFrame:
+    svc = get_sheets_service("work")
+    sid = ACCOUNTS["work"]["spreadsheet_id"]
+    return _read_sheet(svc, sid, WORK_SHEETS["clients"], WORK_COLUMNS["clients"])
+
+
+def get_tasks(task_type: Optional[str] = None) -> pd.DataFrame:
+    """task_type: 'internal' | 'client' | 'external' | None（全部）"""
+    svc = get_sheets_service("work")
+    sid = ACCOUNTS["work"]["spreadsheet_id"]
+    df = _read_sheet(svc, sid, WORK_SHEETS["tasks"], WORK_COLUMNS["tasks"])
+    if task_type:
+        df = df[df["type"].str.lower() == task_type.lower()]
+    return df
+
+
+def get_todos(todo_type: Optional[str] = None) -> pd.DataFrame:
+    svc = get_sheets_service("work")
+    sid = ACCOUNTS["work"]["spreadsheet_id"]
+    df = _read_sheet(svc, sid, WORK_SHEETS["todos"], WORK_COLUMNS["todos"])
+    if todo_type:
+        df = df[df["type"].str.lower() == todo_type.lower()]
+    return df
+
+
+def get_meetings() -> pd.DataFrame:
+    svc = get_sheets_service("work")
+    sid = ACCOUNTS["work"]["spreadsheet_id"]
+    return _read_sheet(svc, sid, WORK_SHEETS["meetings"], WORK_COLUMNS["meetings"])
+
+
+def append_meeting(meeting_row: list):
+    """新增會議記錄"""
+    svc = get_sheets_service("work")
+    sid = ACCOUNTS["work"]["spreadsheet_id"]
+    _append_row(svc, sid, WORK_SHEETS["meetings"], meeting_row)
+
+
+# ══════════════════════════════════════════════════════
+# 個人帳號 — Personal Data
+# ══════════════════════════════════════════════════════
+
+def get_reading() -> pd.DataFrame:
+    svc = get_sheets_service("personal")
+    sid = ACCOUNTS["personal"]["spreadsheet_id"]
+    return _read_sheet(svc, sid, PERSONAL_SHEETS["reading"], PERSONAL_COLUMNS["reading"])
+
+
+def get_fitness() -> pd.DataFrame:
+    svc = get_sheets_service("personal")
+    sid = ACCOUNTS["personal"]["spreadsheet_id"]
+    return _read_sheet(svc, sid, PERSONAL_SHEETS["fitness"], PERSONAL_COLUMNS["fitness"])
+
+
+def get_habits() -> pd.DataFrame:
+    svc = get_sheets_service("personal")
+    sid = ACCOUNTS["personal"]["spreadsheet_id"]
+    return _read_sheet(svc, sid, PERSONAL_SHEETS["habits"], PERSONAL_COLUMNS["habits"])
+
+
+def get_finance() -> pd.DataFrame:
+    svc = get_sheets_service("personal")
+    sid = ACCOUNTS["personal"]["spreadsheet_id"]
+    return _read_sheet(svc, sid, PERSONAL_SHEETS["finance"], PERSONAL_COLUMNS["finance"])
+
+
+def get_goals() -> pd.DataFrame:
+    svc = get_sheets_service("personal")
+    sid = ACCOUNTS["personal"]["spreadsheet_id"]
+    return _read_sheet(svc, sid, PERSONAL_SHEETS["goals"], PERSONAL_COLUMNS["goals"])

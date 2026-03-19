@@ -1,0 +1,23 @@
+# 敏感憑證（絕不上傳）
+.env
+config/token_*.json
+config/credentials_personal.json
+config/credentials_work.json
+
+# 個人隱私資料
+data/personal/
+data/claude_log.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Streamlit
+.streamlit/
+
+# 系統
+.DS_Store
+*.log
