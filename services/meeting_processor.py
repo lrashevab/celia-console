@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 services/meeting_processor.py — 逐字稿 → 結構化會議記錄
-主要：Claude API（claude-sonnet-4-6）
-備援：規則解析（無 API Key 時自動切換）
+輸出格式對應 Celia 標準會議記錄模板（Header + 項目/內容表格）
+主要：Claude API；備援：規則解析
 """
 import json
 import re
@@ -11,16 +11,34 @@ from typing import Optional
 
 from config.settings import ANTHROPIC_API_KEY, CLAUDE_MODEL
 
+# ── 預設記錄人 ───────────────────────────────────────
+DEFAULT_RECORDER = "Celia"
+
 
 # ══════════════════════════════════════════════════════
-# 主入口：自動選擇 AI / 規則 處理
+# 標準會議記錄格式（對應實體表單）
+# ══════════════════════════════════════════════════════
+EMPTY_MEETING = {
+    # Header 欄位
+    "meeting_theme": "",      # 會議主題（如：澄塘工事品牌陪跑會議）
+    "meeting_date":  "",      # 會議日期 YYYY/MM/DD
+    "client_attendees": "",   # 客戶出席
+    "location": "",           # 會議地點
+    "internal_attendees": "", # 與會同仁（公司內部）
+    "recorder": DEFAULT_RECORDER,  # 會議記錄人
+    "agenda": "",             # 會議 Agenda 標題
+    # 議題表格（list of {topic, content}）
+    "topics": [],
+    # 其他（供 Calendar / Sheets 用）
+    "action_items": [],       # 從 topics 中提取的追蹤事項
+    "mode": "rules",
+}
+
+
+# ══════════════════════════════════════════════════════
+# 主入口
 # ══════════════════════════════════════════════════════
 def process_transcript(raw_text: str) -> dict:
-    """
-    輸入：會議逐字稿或條列重點
-    輸出：結構化 dict
-    有 API Key → 用 Claude API；無 → 規則備援
-    """
     if ANTHROPIC_API_KEY:
         try:
             return _process_with_claude(raw_text)
@@ -35,35 +53,48 @@ def process_transcript(raw_text: str) -> dict:
 def _process_with_claude(raw_text: str) -> dict:
     import anthropic
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    today  = date.today().isoformat()
+    today  = date.today().strftime("%Y/%m/%d")
 
-    prompt = f"""你是一位專業的廣告代理商會議記錄助理。今天日期：{today}
+    prompt = f"""你是廣告代理商 Celia 的會議記錄助理，今天日期：{today}
 
-請將以下會議內容結構化，用繁體中文輸出，必須回傳合法 JSON，不要有任何 markdown 包裹。
+請將以下會議內容整理為標準會議記錄格式，用繁體中文，回傳合法 JSON，不要有 markdown 包裹。
+
+規則：
+- meeting_theme：完整的會議名稱（含客戶名稱，如「澄塘工事品牌陪跑第二次訪談」）
+- meeting_date：格式 YYYY/MM/DD
+- client_attendees：客戶方出席人員（姓名+職稱）
+- location：會議地點（若無則留空）
+- internal_attendees：公司內部與會人員（若無資訊則填 "Celia"）
+- recorder：會議記錄人（預設 "Celia"）
+- agenda：本次會議議程標題（一句話）
+- topics：議題列表，每項包含 topic（項目名稱）和 content（詳細內容，保留層級結構）
+- action_items：追蹤事項列表，每項包含 task、owner、deadline
 
 會議內容：
 {raw_text}
 
 JSON 格式：
 {{
-  "title": "會議主題（15字以內）",
-  "date": "YYYY-MM-DD（若無明確日期則用今天）",
-  "start_time": "HH:MM（若無則用 10:00）",
-  "duration_hours": 1,
-  "attendees": ["參與者1", "參與者2"],
-  "client": "客戶名稱（若無則留空）",
-  "summary": "三句話以內的會議摘要",
-  "decisions": ["決策1", "決策2"],
-  "action_items": [
-    {{"task": "任務描述", "owner": "負責人", "deadline": "YYYY-MM-DD"}}
+  "meeting_theme": "...",
+  "meeting_date": "YYYY/MM/DD",
+  "client_attendees": "...",
+  "location": "...",
+  "internal_attendees": "...",
+  "recorder": "Celia",
+  "agenda": "...",
+  "topics": [
+    {{"topic": "業務模式", "content": "現況說明...\\n未來目標..."}},
+    {{"topic": "品牌定位", "content": "..."}}
   ],
-  "next_meeting": "下次會議時間（若無則為 null）",
+  "action_items": [
+    {{"task": "...", "owner": "...", "deadline": "YYYY-MM-DD"}}
+  ],
   "mode": "ai"
 }}"""
 
     response = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=1500,
+        max_tokens=2500,
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -76,147 +107,133 @@ JSON 格式：
 
 
 # ══════════════════════════════════════════════════════
-# 方案 B：規則備援（無 API Key）
+# 方案 B：規則備援
 # ══════════════════════════════════════════════════════
 def _process_with_rules(raw_text: str) -> dict:
-    """純規則解析，不需 API Key"""
     today = date.today()
     lines = [l.strip() for l in raw_text.strip().splitlines() if l.strip()]
+    result = dict(EMPTY_MEETING)
 
-    # ── 標題：取第一行 ────────────────────────────────
-    title = lines[0][:20] if lines else "未命名會議"
+    # ── Header 欄位提取（支援多空格/Tab 分隔的表格格式）──
+    # 分隔符：4個以上空格 或 Tab
+    SEP = r"[ \t]{2,}"
 
-    # ── 日期 ─────────────────────────────────────────
-    date_str = _extract_date(raw_text, today)
+    # 每行拆成欄位片段
+    def extract_field(pattern, text):
+        """在整段文字中找 label，取緊接的值（到下一個 label 或行尾）"""
+        m = re.search(pattern + r"\s+" + r"([^\t\n]*?)(?=\s{3,}[\u4e00-\u9fffA-Za-z]|$)", text)
+        if m:
+            return m.group(1).strip()
+        return ""
 
-    # ── 時間 ─────────────────────────────────────────
-    m = re.search(r"(\d{1,2}):(\d{2})", raw_text)
-    start_time = f"{int(m.group(1)):02d}:{m.group(2)}" if m else "10:00"
+    # 會議主題：Meeting theme 後，到下一個欄位（Meeting Date）之前
+    m = re.search(r"Meeting\s*[Tt]heme\s+(.+?)(?:\s{3,}Meeting\s*[Dd]ate|$)", raw_text, re.MULTILINE)
+    result["meeting_theme"] = m.group(1).strip() if m else (lines[0] if lines else "未命名會議")
 
-    # ── 出席者 ───────────────────────────────────────
-    attendees = _extract_attendees(raw_text)
+    # 日期
+    m = re.search(r"Meeting\s*[Dd]ate\s+(\d{4}[/\-]\d{1,2}[/\-]\d{1,2})", raw_text)
+    result["meeting_date"] = m.group(1).replace("-", "/") if m else today.strftime("%Y/%m/%d")
 
-    # ── 客戶 ─────────────────────────────────────────
-    client = _extract_client(raw_text)
+    # 客戶出席（到下一個欄位前）
+    m = re.search(r"客[戶户]出席\s+(.+?)(?:\s{3,}(?:會議地點|地點)|$)", raw_text, re.MULTILINE)
+    result["client_attendees"] = m.group(1).strip() if m else ""
 
-    # ── 決策（「決定」「決策」「確認」開頭的行）────────
-    decisions = []
+    # 會議地點
+    m = re.search(r"(?:會議地點|地點)\s+(.+?)(?:\s{3,}[\u4e00-\u9fff]|$)", raw_text, re.MULTILINE)
+    result["location"] = m.group(1).strip() if m else ""
+
+    # 與會同仁（到「會議記錄」前）
+    m = re.search(r"與會同仁\s+(.+?)(?:\s{3,}會議記錄|$)", raw_text, re.MULTILINE)
+    result["internal_attendees"] = m.group(1).strip() if m else DEFAULT_RECORDER
+
+    # 會議記錄人（取第一個中文名，避免後續內容混入）
+    m = re.search(r"會議記錄\s+([\u4e00-\u9fff A-Za-z]{1,10})", raw_text)
+    result["recorder"] = m.group(1).strip() if m else DEFAULT_RECORDER
+
+    # Agenda
+    m = re.search(r"會議\s*Agenda\s+(.+?)(?:\n|$)", raw_text)
+    result["agenda"] = m.group(1).strip() if m else ""
+
+    # ── 議題表格提取 ─────────────────────────────────
+    topics = []
+    current_topic = None
+    current_content_lines = []
+
+    # 找到「項目」+「內容」標題行後才開始讀議題（或從 Agenda 之後開始）
+    start_idx = 0
+    for i, line in enumerate(lines):
+        if re.match(r"^項目\s+內容", line) or re.match(r"^項目$", line):
+            start_idx = i + 1
+            break
+        if re.match(r"會議\s*Agenda", line):
+            start_idx = i + 1  # 備援：從 Agenda 行之後開始
+    content_lines = lines[start_idx:]
+
+    for line in content_lines:
+        # 判斷是否為新的議題標題：純中文、2-6字、不含標點符號
+        is_heading = (
+            not line.startswith("》")
+            and not line.startswith("-")
+            and not line.startswith("•")
+            and not line.startswith("（")
+            and re.match(r"^[\u4e00-\u9fff]{2,6}$", line)  # 純中文2-6字
+        )
+        if is_heading:
+            if current_topic:
+                topics.append({
+                    "topic": current_topic,
+                    "content": "\n".join(current_content_lines).strip(),
+                })
+            current_topic = line
+            current_content_lines = []
+        else:
+            if current_topic:
+                current_content_lines.append(line)
+            elif line.startswith("》") or line.startswith("-"):
+                # 沒有明確標題但有內容，歸入「討論事項」
+                if not current_topic:
+                    current_topic = "討論事項"
+                current_content_lines.append(line)
+
+    if current_topic:
+        topics.append({
+            "topic": current_topic,
+            "content": "\n".join(current_content_lines).strip(),
+        })
+
+    # 若無法識別議題，將全文放入一個預設議題
+    if not topics and len(content_lines) > 0:
+        topics = [{"topic": "會議內容", "content": "\n".join(content_lines)}]
+
+    result["topics"] = topics
+
+    # ── Action Items ─────────────────────────────────
+    action_items = []
     for line in lines:
-        if re.match(r"(決定|決策|確認|結論|agreed|decided)[：:：]?\s*", line, re.I):
-            text = re.sub(r"^(決定|決策|確認|結論|agreed|decided)[：:：]?\s*", "", line, flags=re.I)
-            if text:
-                decisions.append(text)
-
-    # ── Action Items（「負責」「截止」「要做」「action」）
-    action_items = _extract_action_items(lines, today)
-
-    # ── 摘要：取前3行有實質內容的句子 ─────────────────
-    summary_lines = [l for l in lines[1:] if len(l) > 8][:3]
-    summary = "。".join(summary_lines) if summary_lines else lines[0] if lines else "—"
-
-    return {
-        "title": title,
-        "date": date_str,
-        "start_time": start_time,
-        "duration_hours": 1,
-        "attendees": attendees,
-        "client": client,
-        "summary": summary,
-        "decisions": decisions,
-        "action_items": action_items,
-        "next_meeting": _extract_next_meeting(raw_text, today),
-        "mode": "rules",
-    }
-
-
-def _extract_date(text: str, today: date) -> str:
-    # YYYY-MM-DD
-    m = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", text)
-    if m:
-        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    # M/D 或 M月D日
-    m = re.search(r"(\d{1,2})[/月](\d{1,2})[日號]?", text)
-    if m:
-        return f"{today.year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-    # 今天/昨天/明天
-    if "今天" in text or "今日" in text:
-        return today.isoformat()
-    if "昨天" in text or "昨日" in text:
-        return (today - timedelta(days=1)).isoformat()
-    return today.isoformat()
-
-
-def _extract_attendees(text: str) -> list:
-    attendees = []
-    # 「出席：A、B、C」格式
-    m = re.search(r"出席[人者]?[：:]\s*(.+)", text)
-    if m:
-        raw = m.group(1)
-        attendees = [a.strip() for a in re.split(r"[、，,\s]+", raw) if a.strip()]
-    if not attendees:
-        # 找2~4字的中文名詞（非動詞）
-        candidates = re.findall(r"(?<![的地得])[\u4e00-\u9fff]{2,4}(?=說|表示|負責|確認|提出)", text)
-        attendees = list(dict.fromkeys(candidates))[:5]
-    return attendees or ["Celia"]
-
-
-def _extract_client(text: str) -> str:
-    m = re.search(r"客戶[：:\s]*([^\s，,。\d]{2,10})", text)
-    if m:
-        return m.group(1).strip()
-    m = re.search(r"(?:與|和|跟|for)\s*([\u4e00-\u9fff A-Za-z]{2,12})\s*(?:開會|討論|會議)", text)
-    if m:
-        return m.group(1).strip()
-    return ""
-
-
-def _extract_action_items(lines: list, today: date) -> list:
-    items = []
-    for line in lines:
-        # 以「負責」「要」「去做」「需要」「請X」開頭的行
-        m_owner = re.search(r"(?:請|由|麻煩)\s*([\u4e00-\u9fff]{2,4})\s*(?:負責|去|來|做)", line)
-        m_task  = re.search(r"(?:負責|要|需要|去做|請.{2,4})\s*(.{4,30})", line)
-
-        # 「X 負責 Y」格式
         m2 = re.match(r"([\u4e00-\u9fff]{2,4})\s*負責\s*(.+)", line)
         if m2:
             deadline = _find_deadline(line, today)
-            items.append({"task": m2.group(2).strip(), "owner": m2.group(1), "deadline": deadline})
-            continue
+            action_items.append({"task": m2.group(2).strip(), "owner": m2.group(1), "deadline": deadline})
+    result["action_items"] = action_items
+    result["mode"] = "rules"
 
-        if m_task:
-            owner = m_owner.group(1) if m_owner else "Celia"
-            deadline = _find_deadline(line, today)
-            task_text = m_task.group(1).strip()
-            if len(task_text) > 3:
-                items.append({"task": task_text, "owner": owner, "deadline": deadline})
-    return items[:8]  # 最多 8 項
+    return result
 
 
 def _find_deadline(text: str, today: date) -> str:
     m = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", text)
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    m = re.search(r"(\d{1,2})[/月](\d{1,2})[日號]?(?:前|截止)?", text)
+    m = re.search(r"(\d{1,2})[/月](\d{1,2})", text)
     if m:
         return f"{today.year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-    if "本週" in text or "這週" in text:
-        days_left = 4 - today.weekday()
-        return (today + timedelta(days=max(days_left, 1))).isoformat()
-    if "下週" in text or "下星期" in text:
+    if "本週" in text:
+        return (today + timedelta(days=4 - today.weekday())).isoformat()
+    if "下週" in text:
         return (today + timedelta(days=7)).isoformat()
     if "明天" in text:
         return (today + timedelta(days=1)).isoformat()
     return (today + timedelta(days=7)).isoformat()
-
-
-def _extract_next_meeting(text: str, today: date) -> Optional[str]:
-    m = re.search(r"下次(?:會議|開會)[：:\s]*(.{2,20})", text)
-    if m:
-        return m.group(1).strip()
-    if "下週" in text and "開會" in text:
-        return (today + timedelta(days=7)).isoformat()
-    return None
 
 
 # ══════════════════════════════════════════════════════
@@ -224,20 +241,21 @@ def _extract_next_meeting(text: str, today: date) -> Optional[str]:
 # ══════════════════════════════════════════════════════
 def format_calendar_description(meeting: dict) -> str:
     lines = []
-    mode_label = "🤖 AI 結構化" if meeting.get("mode") == "ai" else "📝 規則解析"
-    lines.append(f"📋 {meeting.get('summary', '')}  [{mode_label}]")
+    lines.append(f"📋 {meeting.get('agenda', meeting.get('meeting_theme', ''))}")
+    lines.append(f"📍 {meeting.get('location', '—')}")
+    lines.append(f"👥 客戶：{meeting.get('client_attendees', '—')}")
+    lines.append(f"🏢 與會：{meeting.get('internal_attendees', '—')}")
 
-    if meeting.get("decisions"):
-        lines.append("\n✅ 決策事項：")
-        for d in meeting["decisions"]:
-            lines.append(f"  • {d}")
+    if meeting.get("topics"):
+        lines.append("\n── 議題摘要 ──")
+        for t in meeting["topics"][:3]:
+            lines.append(f"\n【{t['topic']}】")
+            content_preview = t["content"][:200] + ("..." if len(t["content"]) > 200 else "")
+            lines.append(content_preview)
 
     if meeting.get("action_items"):
-        lines.append("\n📌 追蹤事項：")
+        lines.append("\n── 追蹤事項 ──")
         for item in meeting["action_items"]:
-            lines.append(f"  • [{item.get('owner','?')}] {item.get('task','')} — 截止：{item.get('deadline','TBD')}")
-
-    if meeting.get("next_meeting"):
-        lines.append(f"\n🗓 下次會議：{meeting['next_meeting']}")
+            lines.append(f"• [{item.get('owner','?')}] {item.get('task','')} — {item.get('deadline','TBD')}")
 
     return "\n".join(lines)
