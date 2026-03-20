@@ -5,7 +5,7 @@ pages/work_dashboard.py — 工作指揮室 v2.0
 """
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 
 from services import google_sheets as gs
 from services.google_auth import is_authenticated
@@ -196,48 +196,66 @@ WORK_CSS = """
     color: #94a3b8;
 }
 
-/* ── 快速指令列（頂部）── */
-.cmd-bar-wrap {
+/* ── 快速新增面板（頂部）── */
+.add-panel-wrap {
     background: #fff;
     border: 1.5px solid #e2e8f0;
     border-radius: 16px;
-    padding: 16px 20px 12px 20px;
+    padding: 20px 24px 16px 24px;
     margin-bottom: 20px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.05);
 }
-.cmd-bar-title {
+.add-panel-title {
     font-size: 0.78rem;
     font-weight: 700;
     color: #475569;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    margin-bottom: 8px;
+    margin-bottom: 14px;
 }
-.cmd-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 10px;
-}
-.cmd-chip {
-    background: #f1f5f9;
-    color: #475569;
-    font-size: 0.72rem;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-weight: 500;
-    white-space: nowrap;
-}
-.cmd-reply {
-    background: #f0f9ff;
-    border-left: 3px solid #0ea5e9;
+.add-success {
+    background: #f0fdf4;
+    border-left: 3px solid #22c55e;
     border-radius: 0 10px 10px 0;
     padding: 10px 14px;
     font-size: 0.83rem;
-    color: #0c4a6e;
-    margin-top: 10px;
+    color: #166534;
+    margin-top: 8px;
     white-space: pre-line;
 }
+.add-error {
+    background: #fef2f2;
+    border-left: 3px solid #ef4444;
+    border-radius: 0 10px 10px 0;
+    padding: 10px 14px;
+    font-size: 0.83rem;
+    color: #991b1b;
+    margin-top: 8px;
+}
+/* ── 新增紀錄 ── */
+.history-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: #f8fafc;
+    margin-bottom: 5px;
+    font-size: 0.8rem;
+    color: #334155;
+}
+.history-type {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+.history-task  { background: #dbeafe; color: #1e40af; }
+.history-todo  { background: #fef3c7; color: #92400e; }
+.history-client{ background: #dcfce7; color: #166534; }
+.history-title { font-weight: 600; flex: 1; }
+.history-meta  { color: #94a3b8; font-size: 0.73rem; white-space: nowrap; }
 
 /* ── 區塊標題 ── */
 .section-title {
@@ -475,75 +493,174 @@ def _render_todos(todos_df: pd.DataFrame):
 
 
 # ══════════════════════════════════════════════════════
-# 子元件：快速指令列（頂部 form 版）
+# 子元件：快速新增面板（頂部結構化表單）
 # ══════════════════════════════════════════════════════
 def _render_cmd_bar(clients_df, tasks_df, todos_df):
-    st.markdown("""
-<div class="cmd-bar-title">⚡ 快速指令列</div>
-<div class="cmd-chips">
-  <span class="cmd-chip">新增任務 [名稱] 給 [客戶] [截止日] [連結]</span>
-  <span class="cmd-chip">新增待辦 [事項] [截止日] [連結]</span>
-  <span class="cmd-chip">新增客戶 [名稱]</span>
-  <span class="cmd-chip">完成了 [任務名]</span>
-  <span class="cmd-chip">今天要做什麼</span>
-</div>
-""", unsafe_allow_html=True)
+    st.markdown('<div class="add-panel-title">⚡ 快速新增</div>', unsafe_allow_html=True)
 
-    with st.form("cmd_form", clear_on_submit=True):
-        col_input, col_btn = st.columns([6, 1])
-        with col_input:
-            user_input = st.text_input(
-                "指令",
-                placeholder="新增任務 Q2廣告提案 給 客戶A 3/28 https://notion.so/xxx",
-                label_visibility="collapsed",
+    # ── 類型切換（表單外，切換立即生效）──────────────
+    if "add_type" not in st.session_state:
+        st.session_state.add_type = "任務"
+
+    type_cols = st.columns(3)
+    type_labels = ["任務", "待辦", "客戶"]
+    for i, label in enumerate(type_labels):
+        with type_cols[i]:
+            active = st.session_state.add_type == label
+            btn_style = "primary" if active else "secondary"
+            if st.button(f"{'✅ ' if label == '任務' else '📝 ' if label == '待辦' else '👤 '}{label}",
+                         key=f"type_btn_{label}", type=btn_style, use_container_width=True):
+                st.session_state.add_type = label
+                st.rerun()
+
+    add_type = st.session_state.add_type
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 表單欄位 ──────────────────────────────────────
+    with st.form("add_item_form", clear_on_submit=True):
+
+        # 第一行：名稱 + 帳號
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            title = st.text_input(
+                f"{'任務名稱' if add_type == '任務' else '待辦事項' if add_type == '待辦' else '客戶名稱'} *",
+                placeholder="例：Q2 廣告提案、確認合約、ACME 品牌",
             )
-        with col_btn:
-            submitted = st.form_submit_button("送出", use_container_width=True, type="primary")
+        with c2:
+            account = st.selectbox("帳號", ["work", "personal"],
+                                   format_func=lambda x: "🏢 工作" if x == "work" else "🏠 接案")
 
-    if not (submitted and user_input and user_input.strip()):
-        # 顯示上一次回覆
-        if st.session_state.get("cmd_last_reply"):
+        if add_type in ("任務", "待辦"):
+            # 第二行：客戶 + 截止日期 + 優先級
+            c3, c4, c5 = st.columns([2, 2, 1])
+            with c3:
+                # 從現有客戶清單取名稱供選擇（可手動輸入）
+                existing = [""] + sorted(clients_df["name"].dropna().unique().tolist()) if not clients_df.empty else [""]
+                client_select = st.selectbox("客戶（可選）", existing)
+                if client_select == "":
+                    client_manual = st.text_input("或手動輸入客戶", placeholder="客戶名稱")
+                    client = client_manual.strip()
+                else:
+                    client = client_select
+            with c4:
+                due_date = st.date_input("截止日期", value=TODAY)
+            with c5:
+                priority = st.selectbox(
+                    "優先",
+                    ["medium", "high", "low"],
+                    format_func=lambda x: {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}[x],
+                )
+
+        # 連結區（每行一個，可貼多個）
+        if add_type in ("任務", "待辦"):
+            links_raw = st.text_area(
+                "相關連結（每行一個，可不填）",
+                placeholder="https://figma.com/xxx\nhttps://docs.google.com/yyy",
+                height=72,
+            )
+        else:
+            links_raw = ""
+
+        # 備註（可選）
+        if add_type == "客戶":
+            c6, c7 = st.columns(2)
+            with c6:
+                industry = st.text_input("產業", placeholder="美妝 / 科技 / 餐飲...")
+            with c7:
+                contact = st.text_input("聯絡人", placeholder="王小明")
+            contract = st.selectbox("合約狀態", ["未簽", "洽談中", "已簽", "執行中", "暫停", "已完成"])
+
+        submitted = st.form_submit_button(
+            f"✅ 新增{'任務' if add_type == '任務' else '待辦' if add_type == '待辦' else '客戶'}",
+            type="primary", use_container_width=True,
+        )
+
+    # ── 處理送出 ──────────────────────────────────────
+    if submitted and title and title.strip():
+        import uuid
+        links = [l.strip() for l in links_raw.splitlines() if l.strip().startswith("http")]
+        links_str = ", ".join(links)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        error_msg = None
+
+        try:
+            if add_type == "任務":
+                task_id = f"T{uuid.uuid4().hex[:4].upper()}"
+                row = [task_id, title.strip(), client, "client", "open", priority,
+                       due_date.isoformat(), "Celia", links_str, "FALSE", ""]
+                gs.append_task(row, account=account)
+                _add_history("任務", title.strip(), client, due_date.isoformat(), now_str, account)
+
+            elif add_type == "待辦":
+                todo_id = f"D{uuid.uuid4().hex[:4].upper()}"
+                row = [todo_id, title.strip(), client, "client", "open",
+                       due_date.isoformat(), "Celia", links_str, "FALSE"]
+                gs.append_todo(row, account=account)
+                _add_history("待辦", title.strip(), client, due_date.isoformat(), now_str, account)
+
+            elif add_type == "客戶":
+                client_id = f"C{uuid.uuid4().hex[:4].upper()}"
+                row = [client_id, title.strip(), industry if add_type == "客戶" else "", "",
+                       contact if add_type == "客戶" else "", "",
+                       contract if add_type == "客戶" else "未簽",
+                       "work" if account == "work" else "freelance",
+                       "", TODAY.isoformat(), ""]
+                from services.google_sheets import _append_row
+                from services.google_auth import get_sheets_service
+                from config.settings import ACCOUNTS
+                svc = get_sheets_service(account)
+                sid = ACCOUNTS[account]["spreadsheet_id"]
+                _append_row(svc, sid, "Clients", row)
+                _add_history("客戶", title.strip(), "", "", now_str, account)
+
+        except Exception as e:
+            error_msg = str(e)
+
+        if error_msg:
+            st.markdown(f'<div class="add-error">⚠️ 寫入失敗：{error_msg}<br>請確認 Google Sheets 連線正常</div>',
+                        unsafe_allow_html=True)
+        else:
+            detail = f"截止：{due_date.isoformat()}" if add_type in ("任務", "待辦") else ""
+            if links:
+                detail += f"  ·  {len(links)} 個連結"
             st.markdown(
-                f'<div class="cmd-reply">{st.session_state.cmd_last_reply}</div>',
+                f'<div class="add-success">✅ 已新增{add_type}：<b>{title.strip()}</b><br>'
+                f'{detail}</div>',
                 unsafe_allow_html=True,
             )
-        return
+            st.rerun()
 
-    cmd     = parse_command(user_input)
-    action  = cmd["action"]
-    reply   = cmd["reply"]
-    account = cmd.get("account", "work")
+    # ── 新增紀錄 ──────────────────────────────────────
+    history = st.session_state.get("add_history", [])
+    if history:
+        st.markdown('<div style="font-size:0.75rem;font-weight:700;color:#94a3b8;'
+                    'letter-spacing:0.06em;margin:16px 0 8px 0">最近新增紀錄</div>',
+                    unsafe_allow_html=True)
+        for h in reversed(history[-10:]):
+            type_cls = {"任務": "history-task", "待辦": "history-todo", "客戶": "history-client"}.get(h["type"], "history-task")
+            meta_parts = []
+            if h.get("client"):
+                meta_parts.append(h["client"])
+            if h.get("due"):
+                meta_parts.append(f"截止 {h['due']}")
+            meta_parts.append(h["account"])
+            meta_str = " · ".join(meta_parts)
+            st.markdown(f"""
+<div class="history-row">
+  <span class="history-type {type_cls}">{h['type']}</span>
+  <span class="history-title">{h['title']}</span>
+  <span class="history-meta">{meta_str}</span>
+  <span class="history-meta">{h['created_at']}</span>
+</div>""", unsafe_allow_html=True)
 
-    error_msg = None
-    try:
-        if action == "add_task":
-            gs.append_task(cmd["data"]["row"], account=account)
-        elif action == "add_todo":
-            gs.append_todo(cmd["data"]["row"], account=account)
-        elif action == "add_client":
-            from services.google_sheets import _append_row
-            from services.google_auth import get_sheets_service
-            from config.settings import ACCOUNTS
-            svc = get_sheets_service(account)
-            sid = ACCOUNTS[account]["spreadsheet_id"]
-            _append_row(svc, sid, "Clients", cmd["data"]["row"])
-        elif action == "complete_task":
-            hint = cmd["data"].get("hint", "")
-            reply += _find_matching_tasks(tasks_df, todos_df, hint)
-        elif action == "query_today":
-            reply = _build_today_summary(tasks_df, todos_df)
-    except Exception as e:
-        error_msg = f"⚠️ 寫入失敗：{e}（請確認 Google Sheets 連線正常）"
 
-    st.session_state["cmd_last_reply"] = error_msg if error_msg else reply
-
-    if not error_msg and action in ("add_task", "add_todo", "add_client"):
-        st.rerun()
-    else:
-        st.markdown(
-            f'<div class="cmd-reply">{st.session_state.cmd_last_reply}</div>',
-            unsafe_allow_html=True,
-        )
+def _add_history(type_: str, title: str, client: str, due: str, created_at: str, account: str):
+    if "add_history" not in st.session_state:
+        st.session_state.add_history = []
+    st.session_state.add_history.append({
+        "type": type_, "title": title, "client": client,
+        "due": due, "created_at": created_at, "account": "🏢" if account == "work" else "🏠",
+    })
 
 
 def _find_matching_tasks(tasks_df, todos_df, hint: str) -> str:
