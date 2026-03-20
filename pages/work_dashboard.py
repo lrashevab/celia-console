@@ -928,8 +928,8 @@ def _render_tasks_with_views(tasks_df: pd.DataFrame, todos_df: pd.DataFrame, cli
     _render_daily_summary(tasks_df, todos_df)
 
     # ── 視圖切換 ───────────────────────────────────
-    view_tab, gantt_tab, batch_tab, todo_tab = st.tabs([
-        "📋 任務清單", "📊 甘特圖", "📥 批次匯入", "✅ 待辦事項"
+    view_tab, gantt_tab, todo_tab = st.tabs([
+        "📋 任務清單", "📊 甘特圖", "✅ 待辦事項"
     ])
 
     with view_tab:
@@ -942,9 +942,6 @@ def _render_tasks_with_views(tasks_df: pd.DataFrame, todos_df: pd.DataFrame, cli
         except Exception as e:
             st.warning(f"甘特圖無法顯示：{e}")
         st.markdown('</div>', unsafe_allow_html=True)
-
-    with batch_tab:
-        _render_batch_import(clients_df)
 
     with todo_tab:
         _render_todos(todos_df)
@@ -1028,9 +1025,12 @@ def _render_demo():
         "_account": ["work", "work"],
     })
 
-    st.markdown('<div class="cmd-bar-wrap">', unsafe_allow_html=True)
-    _render_cmd_bar(demo_clients, demo_tasks, demo_todos)
-    st.markdown('</div>', unsafe_allow_html=True)
+    with st.expander("⚡ 快速新增 / 批次匯入", expanded=True):
+        qadd_tab, qbatch_tab = st.tabs(["📝 逐筆新增", "📥 批次匯入"])
+        with qadd_tab:
+            _render_cmd_bar(demo_clients, demo_tasks, demo_todos)
+        with qbatch_tab:
+            _render_batch_import(demo_clients)
     _render_kpi(demo_clients, demo_tasks, demo_todos)
     col_l, col_r = st.columns([4, 6], gap="large")
     with col_l:
@@ -1120,10 +1120,14 @@ def render():
 
     # ── Tab 1：總覽 ──────────────────────────────────
     with tab_overview:
-        # 快速指令列（最頂部）
-        st.markdown('<div class="cmd-bar-wrap">', unsafe_allow_html=True)
-        _render_cmd_bar(clients_df, tasks_df, todos_df)
-        st.markdown('</div>', unsafe_allow_html=True)
+        # 快速新增面板（可收合）
+        with st.expander("⚡ 快速新增 / 批次匯入", expanded=st.session_state.get("add_panel_open", True)):
+            st.session_state["add_panel_open"] = True
+            qadd_tab, qbatch_tab = st.tabs(["📝 逐筆新增", "📥 批次匯入"])
+            with qadd_tab:
+                _render_cmd_bar(clients_df, tasks_df, todos_df)
+            with qbatch_tab:
+                _render_batch_import(clients_df)
 
         _render_kpi(clients_df, tasks_df, todos_df)
 
