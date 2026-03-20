@@ -3,9 +3,11 @@
 pages/work_dashboard.py — 工作指揮室 v2.0
 高質感 UI + 對話框新增任務 / 客戶
 """
+import re
+import uuid
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from services import google_sheets as gs
 from services.google_auth import is_authenticated
@@ -177,24 +179,84 @@ WORK_CSS = """
 }
 .task-confirmed { font-size: 0.75rem; }
 
-/* ── 待辦列表行 ── */
+/* ── 待辦列表行（暖色系，與任務明顯區分）── */
 .todo-row {
-    background: #f8fafc;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-left: 4px solid #f59e0b;
     border-radius: 10px;
     padding: 10px 14px;
     margin-bottom: 6px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
 }
+.todo-row:hover { background: #fef9c3; }
+.todo-check { font-size: 1rem; color: #d97706; }
 .todo-title {
     font-size: 0.87rem;
-    color: #334155;
+    color: #78350f;
+    font-weight: 500;
+    flex: 1;
 }
 .todo-due {
     font-size: 0.73rem;
-    color: #94a3b8;
+    color: #92400e;
+    background: #fde68a;
+    padding: 2px 7px;
+    border-radius: 8px;
 }
+.todo-due.overdue {
+    color: #fff;
+    background: #ef4444;
+    font-weight: 700;
+}
+
+/* ── 今日/本週摘要條 ── */
+.summary-strip {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.summary-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #334155;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    cursor: default;
+}
+.summary-chip .num { font-size: 1.1rem; font-weight: 800; }
+.summary-chip.red   { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+.summary-chip.amber { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+.summary-chip.blue  { border-color: #93c5fd; background: #eff6ff; color: #1e40af; }
+.summary-chip.green { border-color: #86efac; background: #f0fdf4; color: #166534; }
+
+/* ── 甘特圖區 ── */
+.gantt-wrap { background: #fff; border-radius: 14px; padding: 12px; border: 1px solid #e2e8f0; }
+
+/* ── 批次匯入區 ── */
+.batch-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #f8fafc;
+    border-radius: 8px;
+    margin-bottom: 5px;
+    font-size: 0.82rem;
+}
+.batch-date { color: #6366f1; font-weight: 700; min-width: 56px; }
+.batch-title { flex: 1; color: #1e293b; }
+.batch-client { color: #64748b; font-size: 0.75rem; }
 
 /* ── 快速新增面板（頂部）── */
 .add-panel-wrap {
@@ -469,24 +531,20 @@ def _render_todos(todos_df: pd.DataFrame):
     )
 
     if open_df.empty:
-        st.info("待辦清單是空的。在下方對話框輸入「新增待辦 [事項]」來新增。")
+        st.info("待辦清單是空的。使用頂部快速新增面板 → 待辦。")
         return
 
     for _, row in open_df.iterrows():
         due  = row.get("due_date", "")
         dcls = _due_class(due)
-        confirmed = row.get("confirmed_by_client", "FALSE")
-        confirmed_icon = "✅" if str(confirmed).upper() == "TRUE" else ""
+        client_str = f" · {row.get('client','')}" if row.get("client") else ""
         account = row.get("_account", "work")
 
         st.markdown(f"""
 <div class="todo-row">
-    <div>
-        <span class="todo-title">{row.get('title','—')}</span>
-        {(' · ' + row.get('client','')) if row.get('client') else ''}
-        &nbsp;{_account_tag(account)}
-        {confirmed_icon}
-    </div>
+    <span class="todo-check">☐</span>
+    <span class="todo-title">{row.get('title','—')}{client_str}</span>
+    {_account_tag(account)}
     <span class="todo-due {dcls}">📅 {due}</span>
 </div>
 """, unsafe_allow_html=True)
@@ -663,6 +721,231 @@ def _add_history(type_: str, title: str, client: str, due: str, created_at: str,
     })
 
 
+# ══════════════════════════════════════════════════════
+# 今日 / 本週摘要條
+# ══════════════════════════════════════════════════════
+def _render_daily_summary(tasks_df: pd.DataFrame, todos_df: pd.DataFrame):
+    today_str = TODAY.isoformat()
+    week_end  = (TODAY + timedelta(days=6)).isoformat()
+
+    overdue, today_tasks, week_tasks = [], [], []
+    for _, row in tasks_df.iterrows():
+        if row.get("status", "").lower() in ("completed", "cancelled"):
+            continue
+        due = row.get("due_date", "")
+        try:
+            d = date.fromisoformat(due)
+            if d < TODAY:
+                overdue.append(row)
+            elif due == today_str:
+                today_tasks.append(row)
+            elif due <= week_end:
+                week_tasks.append(row)
+        except Exception:
+            pass
+
+    open_todos = todos_df[todos_df["status"].str.lower() != "completed"] if not todos_df.empty else pd.DataFrame()
+
+    chips = []
+    if overdue:
+        chips.append(f'<div class="summary-chip red"><span class="num">{len(overdue)}</span> 件逾期</div>')
+    chips.append(f'<div class="summary-chip {"amber" if today_tasks else "green"}"><span class="num">{len(today_tasks)}</span> 件今日截止</div>')
+    chips.append(f'<div class="summary-chip blue"><span class="num">{len(week_tasks)}</span> 件本週到期</div>')
+    chips.append(f'<div class="summary-chip amber"><span class="num">{len(open_todos)}</span> 件待辦未完成</div>')
+
+    st.markdown(f'<div class="summary-strip">{"".join(chips)}</div>', unsafe_allow_html=True)
+
+    # 展開今日細節
+    all_today = today_tasks + overdue
+    if all_today:
+        with st.expander(f"📌 今日需關注（{len(all_today)} 件）", expanded=False):
+            for row in all_today:
+                is_over = row.get("due_date", "") < today_str
+                tag = "🔴 逾期" if is_over else "📅 今日"
+                pri = row.get("priority", "medium")
+                pri_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(pri, "🟡")
+                st.markdown(
+                    f"{pri_icon} **{row.get('title','—')}** — {row.get('client','—')} `{tag}`"
+                )
+
+
+# ══════════════════════════════════════════════════════
+# 甘特圖
+# ══════════════════════════════════════════════════════
+def _render_gantt(tasks_df: pd.DataFrame):
+    import plotly.express as px
+
+    df = tasks_df[tasks_df["status"].str.lower().isin(["open", "in-progress"])].copy()
+    if df.empty:
+        st.info("沒有進行中的任務可顯示。")
+        return
+
+    rows = []
+    for _, row in df.iterrows():
+        try:
+            due = date.fromisoformat(row.get("due_date", ""))
+        except Exception:
+            continue
+        # 開始日：取今天和「截止前 7 天」的較晚者，確保不早於今天太多
+        start = max(TODAY - timedelta(days=14), due - timedelta(days=6))
+        rows.append({
+            "任務": row.get("title", "—")[:24],
+            "客戶": row.get("client", "—"),
+            "開始": pd.Timestamp(start),
+            "截止": pd.Timestamp(due),
+            "優先": row.get("priority", "medium"),
+            "狀態": row.get("status", "open"),
+        })
+
+    if not rows:
+        st.info("無有效截止日期的任務。")
+        return
+
+    gdf = pd.DataFrame(rows)
+    color_map = {"high": "#ef4444", "medium": "#f59e0b", "low": "#10b981"}
+
+    fig = px.timeline(
+        gdf, x_start="開始", x_end="截止", y="任務",
+        color="優先", color_discrete_map=color_map,
+        hover_data=["客戶", "狀態"],
+        labels={"優先": "優先級"},
+    )
+    fig.update_yaxes(autorange="reversed")
+    fig.add_vline(
+        x=pd.Timestamp(TODAY), line_dash="dash",
+        line_color="#6366f1", line_width=2,
+        annotation_text="今天", annotation_position="top left",
+    )
+    fig.update_layout(
+        height=max(220, len(rows) * 46 + 80),
+        paper_bgcolor="white", plot_bgcolor="#f8fafc",
+        margin=dict(l=0, r=10, t=30, b=0),
+        font=dict(family="Inter, sans-serif", size=11),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        xaxis_title="",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════
+# 批次時程匯入
+# ══════════════════════════════════════════════════════
+def _parse_timeline_text(text: str) -> list:
+    """解析多行時程文字 → [{date, title, client}, ...]"""
+    items = []
+    year = TODAY.year
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # 格式：M/D (週X) 描述  或  M/D 描述
+        m = re.match(r"(\d{1,2})[/月](\d{1,2})(?:\s*\([^)]*\))?\s+(.+)", line)
+        if not m:
+            continue
+        try:
+            month, day, desc = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+            task_date = date(year, month, day)
+        except (ValueError, OverflowError):
+            continue
+        # 嘗試從描述提取客戶：「給XX」或描述開頭的機構名
+        client = ""
+        cm = re.search(r"給([^\s，,。（(＆&]+)", desc)
+        if cm:
+            client = cm.group(1).strip()
+        items.append({"date": task_date, "title": desc, "client": client})
+    return items
+
+
+def _render_batch_import(clients_df: pd.DataFrame):
+    st.markdown("**📥 批次匯入時程**")
+    st.caption("每行格式：`M/D (週X) 任務描述`，例如：`3/26 (四) 視覺風格方向提案給宇光森`")
+
+    raw = st.text_area(
+        "貼入時程文字",
+        placeholder="3/26 (四) 視覺風格方向提案給宇光森\n3/27 (五) 宇光森提供給客戶\n3/30 (一) 客戶回饋",
+        height=140,
+        label_visibility="collapsed",
+    )
+
+    # 預設客戶 + 帳號
+    col_a, col_b, col_c = st.columns([2, 2, 1])
+    with col_a:
+        existing = ["（由描述自動判斷）"] + sorted(clients_df["name"].dropna().unique().tolist()) if not clients_df.empty else ["（由描述自動判斷）"]
+        default_client = st.selectbox("統一指定客戶（可選）", existing, key="batch_client")
+    with col_b:
+        default_priority = st.selectbox("優先級", ["medium", "high", "low"],
+                                        format_func=lambda x: {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}[x],
+                                        key="batch_priority")
+    with col_c:
+        batch_account = st.selectbox("帳號", ["work", "personal"],
+                                     format_func=lambda x: "🏢 工作" if x == "work" else "🏠 接案",
+                                     key="batch_account")
+
+    if not raw.strip():
+        return
+
+    items = _parse_timeline_text(raw)
+    if not items:
+        st.warning("無法解析，請確認格式。")
+        return
+
+    # 預覽
+    st.markdown(f"**解析結果（{len(items)} 筆）**")
+    for it in items:
+        client_show = (default_client if default_client != "（由描述自動判斷）" else it["client"]) or "—"
+        st.markdown(f"""
+<div class="batch-preview-row">
+  <span class="batch-date">{it['date'].strftime('%m/%d')}</span>
+  <span class="batch-title">{it['title']}</span>
+  <span class="batch-client">👤 {client_show}</span>
+</div>""", unsafe_allow_html=True)
+
+    if st.button("✅ 全部匯入為任務", type="primary", use_container_width=True, key="batch_submit"):
+        success, fail = 0, 0
+        for it in items:
+            client = (default_client if default_client != "（由描述自動判斷）" else it["client"])
+            task_id = f"T{uuid.uuid4().hex[:4].upper()}"
+            row = [task_id, it["title"], client, "client", "open",
+                   default_priority, it["date"].isoformat(), "Celia", "", "FALSE", ""]
+            try:
+                gs.append_task(row, account=batch_account)
+                success += 1
+            except Exception:
+                fail += 1
+        if success:
+            st.success(f"✅ 已匯入 {success} 筆任務！{f'（{fail} 筆失敗）' if fail else ''}")
+            st.rerun()
+        else:
+            st.error("匯入失敗，請確認 Google Sheets 連線。")
+
+
+# ══════════════════════════════════════════════════════
+# 任務區（清單 / 甘特圖 / 批次匯入）
+# ══════════════════════════════════════════════════════
+def _render_tasks_with_views(tasks_df: pd.DataFrame, todos_df: pd.DataFrame, clients_df: pd.DataFrame):
+    # ── 本日/本週摘要 ──────────────────────────────
+    _render_daily_summary(tasks_df, todos_df)
+
+    # ── 視圖切換 ───────────────────────────────────
+    view_tab, gantt_tab, batch_tab, todo_tab = st.tabs([
+        "📋 任務清單", "📊 甘特圖", "📥 批次匯入", "✅ 待辦事項"
+    ])
+
+    with view_tab:
+        _render_tasks(tasks_df)
+
+    with gantt_tab:
+        st.markdown('<div class="gantt-wrap">', unsafe_allow_html=True)
+        _render_gantt(tasks_df)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with batch_tab:
+        _render_batch_import(clients_df)
+
+    with todo_tab:
+        _render_todos(todos_df)
+
+
 def _find_matching_tasks(tasks_df, todos_df, hint: str) -> str:
     """在任務和待辦中搜尋符合 hint 的項目"""
     results = []
@@ -745,9 +1028,11 @@ def _render_demo():
     _render_cmd_bar(demo_clients, demo_tasks, demo_todos)
     st.markdown('</div>', unsafe_allow_html=True)
     _render_kpi(demo_clients, demo_tasks, demo_todos)
-    _render_clients(demo_clients)
-    _render_tasks(demo_tasks)
-    _render_todos(demo_todos)
+    col_l, col_r = st.columns([4, 6], gap="large")
+    with col_l:
+        _render_clients(demo_clients)
+    with col_r:
+        _render_tasks_with_views(demo_tasks, demo_todos, demo_clients)
 
 
 # ══════════════════════════════════════════════════════
@@ -838,12 +1123,11 @@ def render():
 
         _render_kpi(clients_df, tasks_df, todos_df)
 
-        col_left, col_right = st.columns([1, 1], gap="large")
+        col_left, col_right = st.columns([4, 6], gap="large")
         with col_left:
             _render_clients(clients_df)
-            _render_todos(todos_df)
         with col_right:
-            _render_tasks(tasks_df)
+            _render_tasks_with_views(tasks_df, todos_df, clients_df)
 
     # ── Tab 2：行事曆 ────────────────────────────────
     with tab_calendar:
