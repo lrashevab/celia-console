@@ -339,6 +339,220 @@ WORK_CSS = """
     border-radius: 10px;
     font-weight: 600;
 }
+
+/* ══ 每日簡報（Daily Briefing）元件 ══ */
+
+/* 區塊小標題 */
+.dbr-section-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #64748b;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    margin: 16px 0 8px 0;
+}
+
+/* 立即處理卡片 */
+.dbr-urgent-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fff;
+    border: 1px solid #f1f5f9;
+    border-left: 4px solid #ef4444;
+    border-radius: 10px;
+    padding: 11px 14px;
+    margin-bottom: 7px;
+    gap: 12px;
+}
+.dbr-urgent-left { flex: 1; min-width: 0; }
+.dbr-urgent-title {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dbr-urgent-meta {
+    font-size: 0.73rem;
+    color: #94a3b8;
+    margin-top: 3px;
+}
+.dbr-urgent-right {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+}
+.dbr-overdue-tag {
+    background: #fee2e2;
+    color: #b91c1c;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 8px;
+}
+.dbr-today-tag {
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 8px;
+}
+.dbr-pri-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 8px;
+}
+
+/* 明日預警列 */
+.dbr-tomorrow-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #fffbeb;
+    border-left: 3px solid #f59e0b;
+    border-radius: 0 8px 8px 0;
+    padding: 8px 12px;
+    margin-bottom: 5px;
+}
+.dbr-tomorrow-title {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #1e293b;
+    flex: 1;
+}
+.dbr-tomorrow-meta {
+    font-size: 0.72rem;
+    color: #92400e;
+}
+
+/* 本週節奏橫條 */
+.dbr-week-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 12px 14px;
+}
+.dbr-week-cell {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+}
+.dbr-week-cell.dbr-week-today .dbr-week-day {
+    color: #6366f1;
+    font-weight: 800;
+}
+.dbr-week-cell.dbr-week-today .dbr-week-date {
+    color: #6366f1;
+    font-weight: 700;
+}
+.dbr-week-day {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+}
+.dbr-week-date {
+    font-size: 0.65rem;
+    color: #cbd5e1;
+}
+.dbr-week-bar-wrap {
+    height: 40px;
+    display: flex;
+    align-items: flex-end;
+    width: 100%;
+    justify-content: center;
+}
+.dbr-week-bar {
+    width: 80%;
+    min-height: 4px;
+    border-radius: 4px 4px 0 0;
+    transition: height 0.3s;
+}
+.dbr-week-count {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #475569;
+}
+
+/* 客戶熱度 */
+.dbr-heat-wrap {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+}
+.dbr-heat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 7px;
+}
+.dbr-heat-row:last-child { margin-bottom: 0; }
+.dbr-heat-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #334155;
+    min-width: 80px;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dbr-heat-bar-wrap {
+    flex: 1;
+    background: #e2e8f0;
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+}
+.dbr-heat-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+    border-radius: 4px;
+    transition: width 0.4s;
+}
+.dbr-heat-count {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #6366f1;
+    min-width: 20px;
+    text-align: right;
+}
+
+/* 待辦積壓 */
+.dbr-todo-wrap {
+    background: #fffbeb;
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+}
+.dbr-todo-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #fde68a;
+    gap: 12px;
+}
+.dbr-todo-row:last-child { border-bottom: none; }
+.dbr-todo-title {
+    font-size: 0.83rem;
+    font-weight: 500;
+    color: #78350f;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 </style>
 """
 
@@ -770,10 +984,23 @@ def _add_history(type_: str, title: str, client: str, due: str, created_at: str,
 # 今日 / 本週摘要條
 # ══════════════════════════════════════════════════════
 def _render_daily_summary(tasks_df: pd.DataFrame, todos_df: pd.DataFrame):
-    today_str = TODAY.isoformat()
-    week_end  = (TODAY + timedelta(days=6)).isoformat()
+    """
+    每日簡報思路：回答「今天我該做什麼？」
 
-    overdue, today_tasks, week_tasks = [], [], []
+    1. 數字摘要條   — 逾期/今日/明日/本週件數，一眼掌握整體壓力
+    2. 🚨 立即處理  — 逾期 + 今日截止，展示客戶/負責人/逾期天數
+    3. ⚡ 明日預警  — 明天截止的任務，今天就要提前備料
+    4. 📊 本週節奏  — 每日任務數柱狀圖，視覺化每天的壓力分佈
+    5. 🏢 客戶熱度  — 各客戶未完成任務數，避免某個客戶被長期遺忘
+    6. 📝 待辦積壓  — 最舊 3 筆未完成待辦，避免小事被大任務淹沒
+    """
+    today_str    = TODAY.isoformat()
+    tomorrow     = TODAY + timedelta(days=1)
+    tomorrow_str = tomorrow.isoformat()
+    week_end     = (TODAY + timedelta(days=6)).isoformat()
+
+    # ── 分類所有開放任務 ────────────────────────────────
+    overdue, today_tasks, tomorrow_tasks, week_tasks = [], [], [], []
     for _, row in tasks_df.iterrows():
         if row.get("status", "").lower() in ("completed", "cancelled"):
             continue
@@ -784,34 +1011,141 @@ def _render_daily_summary(tasks_df: pd.DataFrame, todos_df: pd.DataFrame):
                 overdue.append(row)
             elif due == today_str:
                 today_tasks.append(row)
+            elif due == tomorrow_str:
+                tomorrow_tasks.append(row)
             elif due <= week_end:
                 week_tasks.append(row)
         except Exception:
             pass
 
-    open_todos = todos_df[todos_df["status"].str.lower() != "completed"] if not todos_df.empty else pd.DataFrame()
+    open_todos = []
+    if not todos_df.empty:
+        for _, row in todos_df.iterrows():
+            if row.get("status", "").lower() not in ("completed", "cancelled"):
+                open_todos.append(row)
 
+    # ── 1. 數字摘要條 ──────────────────────────────────
     chips = []
     if overdue:
         chips.append(f'<div class="summary-chip red"><span class="num">{len(overdue)}</span> 件逾期</div>')
     chips.append(f'<div class="summary-chip {"amber" if today_tasks else "green"}"><span class="num">{len(today_tasks)}</span> 件今日截止</div>')
+    if tomorrow_tasks:
+        chips.append(f'<div class="summary-chip amber"><span class="num">{len(tomorrow_tasks)}</span> 件明日截止</div>')
     chips.append(f'<div class="summary-chip blue"><span class="num">{len(week_tasks)}</span> 件本週到期</div>')
-    chips.append(f'<div class="summary-chip amber"><span class="num">{len(open_todos)}</span> 件待辦未完成</div>')
-
+    chips.append(f'<div class="summary-chip {"amber" if open_todos else "green"}"><span class="num">{len(open_todos)}</span> 件待辦未完成</div>')
     st.markdown(f'<div class="summary-strip">{"".join(chips)}</div>', unsafe_allow_html=True)
 
-    # 展開今日細節
-    all_today = today_tasks + overdue
-    if all_today:
-        with st.expander(f"📌 今日需關注（{len(all_today)} 件）", expanded=False):
-            for row in all_today:
-                is_over = row.get("due_date", "") < today_str
-                tag = "🔴 逾期" if is_over else "📅 今日"
-                pri = row.get("priority", "medium")
-                pri_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(pri, "🟡")
-                st.markdown(
-                    f"{pri_icon} **{row.get('title','—')}** — {row.get('client','—')} `{tag}`"
-                )
+    # ── 2. 立即處理 ────────────────────────────────────
+    urgent = overdue + today_tasks
+    if urgent:
+        with st.expander(f"🚨 立即處理（{len(urgent)} 件）", expanded=True):
+            pri_colors = {"high": "#ef4444", "medium": "#f59e0b", "low": "#10b981", "scheduled": "#8b5cf6"}
+            pri_labels = {"high": "高", "medium": "中", "low": "低", "scheduled": "預訂"}
+            for row in urgent:
+                due = row.get("due_date", "")
+                is_over = due < today_str
+                try:
+                    days_over = (TODAY - date.fromisoformat(due)).days if is_over else 0
+                except Exception:
+                    days_over = 0
+                pri       = row.get("priority", "medium")
+                color     = pri_colors.get(pri, "#f59e0b")
+                pri_label = pri_labels.get(pri, "中")
+                assignee  = row.get("assigned_to", "") or "—"
+                client    = row.get("client", "") or "—"
+                tag_html  = (f'<span class="dbr-overdue-tag">逾期 {days_over} 天</span>'
+                             if is_over else '<span class="dbr-today-tag">今日截止</span>')
+                st.markdown(f"""
+<div class="dbr-urgent-card" style="border-left-color:{color}">
+  <div class="dbr-urgent-left">
+    <div class="dbr-urgent-title">{row.get('title','—')}</div>
+    <div class="dbr-urgent-meta">🏢 {client} &nbsp;·&nbsp; 👤 {assignee}</div>
+  </div>
+  <div class="dbr-urgent-right">
+    {tag_html}
+    <span class="dbr-pri-badge" style="background:{color}22;color:{color}">{pri_label}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # ── 3. 明日預警 ────────────────────────────────────
+    if tomorrow_tasks:
+        with st.expander(f"⚡ 明日預警（{len(tomorrow_tasks)} 件）", expanded=False):
+            pri_colors = {"high": "#ef4444", "medium": "#f59e0b", "low": "#10b981", "scheduled": "#8b5cf6"}
+            for row in tomorrow_tasks:
+                pri   = row.get("priority", "medium")
+                color = pri_colors.get(pri, "#f59e0b")
+                st.markdown(f"""
+<div class="dbr-tomorrow-row" style="border-left-color:{color}">
+  <span class="dbr-tomorrow-title">{row.get('title','—')}</span>
+  <span class="dbr-tomorrow-meta">{row.get('client','—')} · {row.get('assigned_to','—') or '—'}</span>
+</div>""", unsafe_allow_html=True)
+
+    # ── 4. 本週節奏（每日任務數柱狀圖）──────────────────
+    open_df = tasks_df[~tasks_df["status"].str.lower().isin(["completed", "cancelled"])]
+    week_counts: dict[date, int] = {TODAY + timedelta(days=i): 0 for i in range(7)}
+    for _, row in open_df.iterrows():
+        try:
+            d = date.fromisoformat(row.get("due_date", ""))
+            if d in week_counts:
+                week_counts[d] += 1
+        except Exception:
+            pass
+
+    max_cnt = max(week_counts.values(), default=1) or 1
+    zh_days = ["一", "二", "三", "四", "五", "六", "日"]
+    day_cells = ""
+    for d, cnt in week_counts.items():
+        label    = zh_days[d.weekday()]
+        is_today = d == TODAY
+        bar_h    = max(4, int(cnt / max_cnt * 40))
+        bar_col  = "#6366f1" if is_today else ("#f59e0b" if cnt >= 3 else "#93c5fd")
+        today_cls = ' dbr-week-today' if is_today else ''
+        day_cells += f"""<div class="dbr-week-cell{today_cls}">
+  <div class="dbr-week-day">週{label}</div>
+  <div class="dbr-week-date">{d.month}/{d.day}</div>
+  <div class="dbr-week-bar-wrap">
+    <div class="dbr-week-bar" style="height:{bar_h}px;background:{bar_col}"></div>
+  </div>
+  <div class="dbr-week-count">{'—' if cnt == 0 else cnt}</div>
+</div>"""
+    st.markdown(f'<div class="dbr-section-label">📊 本週節奏</div>'
+                f'<div class="dbr-week-row">{day_cells}</div>', unsafe_allow_html=True)
+
+    # ── 5. 客戶熱度（開放任務最多的前 5 客戶）───────────
+    if not open_df.empty:
+        client_counts = (
+            open_df[open_df["client"].str.strip() != ""]
+            .groupby("client").size()
+            .sort_values(ascending=False)
+            .head(5)
+        )
+        if not client_counts.empty:
+            max_c      = client_counts.max() or 1
+            heat_cells = ""
+            for cname, cnt in client_counts.items():
+                pct = int(cnt / max_c * 100)
+                heat_cells += f"""<div class="dbr-heat-row">
+  <div class="dbr-heat-name">{cname}</div>
+  <div class="dbr-heat-bar-wrap"><div class="dbr-heat-bar" style="width:{pct}%"></div></div>
+  <div class="dbr-heat-count">{cnt}</div>
+</div>"""
+            st.markdown(f'<div class="dbr-section-label">🏢 客戶負擔</div>'
+                        f'<div class="dbr-heat-wrap">{heat_cells}</div>', unsafe_allow_html=True)
+
+    # ── 6. 待辦積壓（最舊 3 筆）────────────────────────
+    if open_todos:
+        sorted_todos = sorted(open_todos, key=lambda r: r.get("due_date", "9999-12-31"))[:3]
+        todo_rows = ""
+        for row in sorted_todos:
+            due    = row.get("due_date", "")
+            is_ov  = due < today_str if due else False
+            due_cls = ' class="todo-due overdue"' if is_ov else ' class="todo-due"'
+            todo_rows += f"""<div class="dbr-todo-row">
+  <span class="dbr-todo-title">{row.get('title','—')}</span>
+  <span{due_cls}>{due or '無截止日'}</span>
+</div>"""
+        st.markdown(f'<div class="dbr-section-label">📝 待辦積壓（最舊3件）</div>'
+                    f'<div class="dbr-todo-wrap">{todo_rows}</div>', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════
