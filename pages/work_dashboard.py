@@ -196,24 +196,47 @@ WORK_CSS = """
     color: #94a3b8;
 }
 
-/* ── 聊天對話框 ── */
-.chat-container {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 20px;
-    padding: 20px;
-    margin-top: 24px;
+/* ── 快速指令列（頂部）── */
+.cmd-bar-wrap {
+    background: #fff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 16px 20px 12px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.05);
 }
-.chat-title {
-    font-size: 1rem;
+.cmd-bar-title {
+    font-size: 0.78rem;
     font-weight: 700;
-    color: #1e293b;
-    margin-bottom: 4px;
+    color: #475569;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
 }
-.chat-hint {
-    font-size: 0.75rem;
-    color: #94a3b8;
-    margin-bottom: 16px;
+.cmd-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.cmd-chip {
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.cmd-reply {
+    background: #f0f9ff;
+    border-left: 3px solid #0ea5e9;
+    border-radius: 0 10px 10px 0;
+    padding: 10px 14px;
+    font-size: 0.83rem;
+    color: #0c4a6e;
+    margin-top: 10px;
+    white-space: pre-line;
 }
 
 /* ── 區塊標題 ── */
@@ -452,54 +475,51 @@ def _render_todos(todos_df: pd.DataFrame):
 
 
 # ══════════════════════════════════════════════════════
-# 子元件：聊天對話框
+# 子元件：快速指令列（頂部 form 版）
 # ══════════════════════════════════════════════════════
-def _render_chat(clients_df, tasks_df, todos_df):
+def _render_cmd_bar(clients_df, tasks_df, todos_df):
     st.markdown("""
-<div class="chat-container">
-    <div class="chat-title">💬 快速指令列</div>
-    <div class="chat-hint">
-        試試看：「新增任務 Q2廣告提案 給 客戶A 明天」、「新增待辦 確認合約」、「新增客戶 OO品牌」
-    </div>
+<div class="cmd-bar-title">⚡ 快速指令列</div>
+<div class="cmd-chips">
+  <span class="cmd-chip">新增任務 [名稱] 給 [客戶] [截止日] [連結]</span>
+  <span class="cmd-chip">新增待辦 [事項] [截止日] [連結]</span>
+  <span class="cmd-chip">新增客戶 [名稱]</span>
+  <span class="cmd-chip">完成了 [任務名]</span>
+  <span class="cmd-chip">今天要做什麼</span>
 </div>
 """, unsafe_allow_html=True)
 
-    # 初始化聊天歷史
-    if "work_chat" not in st.session_state:
-        st.session_state.work_chat = [
-            {"role": "assistant", "content": "嗨 Celia 👋 有什麼任務需要記下來嗎？"}
-        ]
+    with st.form("cmd_form", clear_on_submit=True):
+        col_input, col_btn = st.columns([6, 1])
+        with col_input:
+            user_input = st.text_input(
+                "指令",
+                placeholder="新增任務 Q2廣告提案 給 客戶A 3/28 https://notion.so/xxx",
+                label_visibility="collapsed",
+            )
+        with col_btn:
+            submitted = st.form_submit_button("送出", use_container_width=True, type="primary")
 
-    # 顯示歷史訊息
-    for msg in st.session_state.work_chat:
-        with st.chat_message(msg["role"], avatar="🤖" if msg["role"] == "assistant" else "👤"):
-            st.markdown(msg["content"])
-
-    # 輸入框
-    user_input = st.chat_input("輸入指令（新增任務/待辦/客戶、完成了...）")
-    if not user_input:
+    if not (submitted and user_input and user_input.strip()):
+        # 顯示上一次回覆
+        if st.session_state.get("cmd_last_reply"):
+            st.markdown(
+                f'<div class="cmd-reply">{st.session_state.cmd_last_reply}</div>',
+                unsafe_allow_html=True,
+            )
         return
 
-    # 顯示用戶訊息
-    st.session_state.work_chat.append({"role": "user", "content": user_input})
-    with st.chat_message("user", avatar="👤"):
-        st.markdown(user_input)
-
-    # 解析指令
-    cmd = parse_command(user_input)
+    cmd     = parse_command(user_input)
     action  = cmd["action"]
     reply   = cmd["reply"]
     account = cmd.get("account", "work")
 
-    # 執行操作
     error_msg = None
     try:
         if action == "add_task":
-            row = cmd["data"]["row"]
-            gs.append_task(row, account=account)
+            gs.append_task(cmd["data"]["row"], account=account)
         elif action == "add_todo":
-            row = cmd["data"]["row"]
-            gs.append_todo(row, account=account)
+            gs.append_todo(cmd["data"]["row"], account=account)
         elif action == "add_client":
             from services.google_sheets import _append_row
             from services.google_auth import get_sheets_service
@@ -513,18 +533,17 @@ def _render_chat(clients_df, tasks_df, todos_df):
         elif action == "query_today":
             reply = _build_today_summary(tasks_df, todos_df)
     except Exception as e:
-        error_msg = f"⚠️ 寫入失敗：{e}\n\n（請確認 Google Sheets 連線正常）"
+        error_msg = f"⚠️ 寫入失敗：{e}（請確認 Google Sheets 連線正常）"
 
-    final_reply = error_msg if error_msg else reply
+    st.session_state["cmd_last_reply"] = error_msg if error_msg else reply
 
-    # 顯示 AI 回覆
-    st.session_state.work_chat.append({"role": "assistant", "content": final_reply})
-    with st.chat_message("assistant", avatar="🤖"):
-        st.markdown(final_reply)
-
-    # 成功寫入後重新整理
     if not error_msg and action in ("add_task", "add_todo", "add_client"):
         st.rerun()
+    else:
+        st.markdown(
+            f'<div class="cmd-reply">{st.session_state.cmd_last_reply}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def _find_matching_tasks(tasks_df, todos_df, hint: str) -> str:
@@ -605,11 +624,13 @@ def _render_demo():
         "_account": ["work", "work"],
     })
 
+    st.markdown('<div class="cmd-bar-wrap">', unsafe_allow_html=True)
+    _render_cmd_bar(demo_clients, demo_tasks, demo_todos)
+    st.markdown('</div>', unsafe_allow_html=True)
     _render_kpi(demo_clients, demo_tasks, demo_todos)
     _render_clients(demo_clients)
     _render_tasks(demo_tasks)
     _render_todos(demo_todos)
-    _render_chat(demo_clients, demo_tasks, demo_todos)
 
 
 # ══════════════════════════════════════════════════════
@@ -693,6 +714,11 @@ def render():
 
     # ── Tab 1：總覽 ──────────────────────────────────
     with tab_overview:
+        # 快速指令列（最頂部）
+        st.markdown('<div class="cmd-bar-wrap">', unsafe_allow_html=True)
+        _render_cmd_bar(clients_df, tasks_df, todos_df)
+        st.markdown('</div>', unsafe_allow_html=True)
+
         _render_kpi(clients_df, tasks_df, todos_df)
 
         col_left, col_right = st.columns([1, 1], gap="large")
@@ -701,9 +727,6 @@ def render():
             _render_todos(todos_df)
         with col_right:
             _render_tasks(tasks_df)
-
-        st.divider()
-        _render_chat(clients_df, tasks_df, todos_df)
 
     # ── Tab 2：行事曆 ────────────────────────────────
     with tab_calendar:
