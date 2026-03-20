@@ -17,19 +17,58 @@ st.set_page_config(
 # ── 全局樣式 ─────────────────────────────────────────
 st.markdown("""
 <style>
-/* 側邊欄模式切換按鈕加大 */
-section[data-testid="stSidebar"] .stSelectbox > div > div {
-    font-size: 1.1rem;
-    font-weight: bold;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+
+/* 側邊欄 */
+section[data-testid="stSidebar"] {
+    background: #0f172a;
 }
+section[data-testid="stSidebar"] * {
+    color: #cbd5e1 !important;
+}
+section[data-testid="stSidebar"] .stSelectbox > div > div {
+    font-size: 1rem;
+    font-weight: 600;
+    background: #1e293b;
+    border-color: #334155;
+    color: #f1f5f9 !important;
+}
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 {
+    color: #f8fafc !important;
+    font-weight: 700;
+}
+section[data-testid="stSidebar"] .stDivider { border-color: #334155; }
+
 /* 指標卡片 */
 [data-testid="stMetricValue"] { font-size: 2rem !important; }
+
+/* 全局卡片平滑 */
+[data-testid="stExpander"] {
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+}
+
+/* 按鈕 */
+.stButton > button {
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
 /* 硬隔離警告條 */
 .isolation-badge {
     padding: 4px 12px;
     border-radius: 20px;
     font-size: 0.75rem;
     font-weight: bold;
+}
+
+/* chat input 樣式 */
+[data-testid="stChatInput"] {
+    border-radius: 16px !important;
 }
 </style>
 """, unsafe_allow_html=True)
