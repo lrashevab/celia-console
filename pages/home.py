@@ -186,7 +186,7 @@ def render():
                                         st.code(c, language="text")
 
                             # 摘要（可編輯）
-                            summary_key = f"summary_{s['id']}"
+                            summary_key = f"summary_{day}_{idx}_{s.get('id','')[:8]}"
                             new_summary = st.text_input(
                                 "今日摘要（可選填，用於生成文章）",
                                 value=s.get("summary", ""),
