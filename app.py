@@ -91,8 +91,6 @@ section[data-testid="stSidebar"] .stDivider { border-color: #2d3748; }
 PAGES = [
     ("🤖", "Claude 指揮中心", "claude"),
     ("🏢", "工作指揮室",      "work"),
-    ("📋", "會議記錄",        "meeting"),
-    ("🗓", "行事曆",          "calendar"),
     ("🏠", "個人生活",        "personal"),
 ]
 
@@ -172,12 +170,6 @@ if mode == "claude":
 elif mode == "work":
     from pages.work_dashboard import render as work_render
     work_render()
-elif mode == "meeting":
-    from pages.meeting_page import render as meeting_render
-    meeting_render()
-elif mode == "calendar":
-    from pages.calendar_page import render as calendar_render
-    calendar_render()
 else:
     from pages.personal_dashboard import render as personal_render
     personal_render()

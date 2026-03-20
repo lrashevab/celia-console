@@ -686,18 +686,31 @@ def render():
         tasks_df   = all_tasks
         todos_df   = all_todos
 
-    # ── 渲染各區塊 ──────────────────────────────────
-    _render_kpi(clients_df, tasks_df, todos_df)
+    # ── 頂層三分頁 ──────────────────────────────────
+    tab_overview, tab_calendar, tab_meeting = st.tabs([
+        "📊 總覽", "🗓 行事曆", "📋 會議記錄"
+    ])
 
-    col_left, col_right = st.columns([1, 1], gap="large")
+    # ── Tab 1：總覽 ──────────────────────────────────
+    with tab_overview:
+        _render_kpi(clients_df, tasks_df, todos_df)
 
-    with col_left:
-        _render_clients(clients_df)
-        _render_todos(todos_df)
+        col_left, col_right = st.columns([1, 1], gap="large")
+        with col_left:
+            _render_clients(clients_df)
+            _render_todos(todos_df)
+        with col_right:
+            _render_tasks(tasks_df)
 
-    with col_right:
-        _render_tasks(tasks_df)
+        st.divider()
+        _render_chat(clients_df, tasks_df, todos_df)
 
-    # ── 對話框（全寬） ───────────────────────────────
-    st.divider()
-    _render_chat(clients_df, tasks_df, todos_df)
+    # ── Tab 2：行事曆 ────────────────────────────────
+    with tab_calendar:
+        from pages.calendar_page import render as cal_render
+        cal_render()
+
+    # ── Tab 3：會議記錄 ──────────────────────────────
+    with tab_meeting:
+        from pages.meeting_page import render as meeting_render
+        meeting_render()

@@ -11,6 +11,45 @@ from config.settings import ACCOUNTS
 from services.google_auth import get_calendar_service
 
 
+def list_calendars(account: str = "work") -> list:
+    """列出帳號下所有可見行事曆（含他人分享給你的）"""
+    svc = get_calendar_service(account)
+    try:
+        result = svc.calendarList().list().execute()
+        return result.get("items", [])
+    except HttpError:
+        return []
+
+
+def list_events_from_calendars(
+    calendar_ids: list,
+    start_dt: datetime,
+    end_dt: datetime,
+    account: str = "work",
+) -> list:
+    """從多個行事曆讀取指定時間範圍的事件"""
+    svc = get_calendar_service(account)
+    all_events = []
+    for cal_id in calendar_ids:
+        try:
+            result = svc.events().list(
+                calendarId=cal_id,
+                timeMin=start_dt.isoformat() + "Z",
+                timeMax=end_dt.isoformat() + "Z",
+                maxResults=250,
+                singleEvents=True,
+                orderBy="startTime",
+            ).execute()
+            items = result.get("items", [])
+            for item in items:
+                item["_calendarId"] = cal_id
+            all_events.extend(items)
+        except HttpError:
+            pass
+    all_events.sort(key=lambda e: e.get("start", {}).get("dateTime", e.get("start", {}).get("date", "")))
+    return all_events
+
+
 def create_meeting_event(
     title: str,
     date_str: str,           # "YYYY-MM-DD"

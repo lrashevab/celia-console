@@ -560,22 +560,65 @@ def render():
         st.markdown(f'<div style="font-size:1.1rem;font-weight:700;color:#1e293b;margin:8px 0 14px 0">{title_str}</div>',
                     unsafe_allow_html=True)
 
-        # ── 取得事件 ─────────────────────────────────
-        events_raw = []
+        # ── 行事曆選擇器 ─────────────────────────────
+        cal_list = []
         if is_authenticated(account):
             try:
-                # 根據視圖範圍決定取幾天的事件
+                cal_list = gc.list_calendars(account)
+            except Exception:
+                pass
+
+        # name → id 映射
+        cal_options = {c.get("summary", c["id"]): c["id"] for c in cal_list}
+
+        if cal_options:
+            cal_key = f"selected_cals_{account}"
+            if cal_key not in st.session_state:
+                st.session_state[cal_key] = list(cal_options.keys())  # 預設全選
+
+            with st.expander(f"📅 選擇行事曆（共 {len(cal_options)} 個）", expanded=False):
+                selected_names = []
+                cols_chk = st.columns(2)
+                for idx, name in enumerate(cal_options):
+                    with cols_chk[idx % 2]:
+                        checked = name in st.session_state[cal_key]
+                        if st.checkbox(name, value=checked, key=f"cal_chk_{account}_{name}"):
+                            selected_names.append(name)
+                st.session_state[cal_key] = selected_names
+
+            selected_cal_ids = [cal_options[n] for n in st.session_state.get(cal_key, []) if n in cal_options]
+        else:
+            selected_cal_ids = []
+
+        # ── 取得事件 ─────────────────────────────────
+        events_raw = []
+        if not is_authenticated(account):
+            st.info(f"{'工作' if account=='work' else '個人'}帳號尚未授權 Google。")
+        elif not selected_cal_ids:
+            st.info("請在上方勾選至少一個行事曆。")
+        else:
+            try:
+                # 根據視圖計算正確時間範圍
                 if view_mode == "月":
-                    fetch_days = 45
+                    start_dt = datetime(anchor.year, anchor.month, 1)
+                    ny, nm = (anchor.year, anchor.month + 1) if anchor.month < 12 else (anchor.year + 1, 1)
+                    end_dt = datetime(ny, nm, 1)
                 elif view_mode == "週":
-                    fetch_days = 14
+                    ws = anchor - timedelta(days=anchor.weekday())
+                    start_dt = datetime(ws.year, ws.month, ws.day)
+                    end_dt = start_dt + timedelta(days=7)
                 else:
-                    fetch_days = 3
-                events_raw = gc.list_upcoming_events(days=fetch_days, account=account)
+                    start_dt = datetime(anchor.year, anchor.month, anchor.day)
+                    end_dt = start_dt + timedelta(days=1)
+
+                events_raw = gc.list_events_from_calendars(
+                    calendar_ids=selected_cal_ids,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
+                    account=account,
+                )
             except Exception as e:
                 st.warning(f"無法讀取行事曆：{e}")
-        else:
-            st.info(f"{'工作' if account=='work' else '個人'}帳號尚未授權 Google。")
 
         ev_map = _events_by_date(events_raw)
 
