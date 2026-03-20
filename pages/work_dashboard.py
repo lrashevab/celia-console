@@ -811,8 +811,9 @@ def _render_gantt(tasks_df: pd.DataFrame):
         labels={"優先": "優先級"},
     )
     fig.update_yaxes(autorange="reversed")
+    # add_vline 需要字串格式，不接受 pd.Timestamp
     fig.add_vline(
-        x=pd.Timestamp(TODAY), line_dash="dash",
+        x=TODAY.isoformat(), line_dash="dash",
         line_color="#6366f1", line_width=2,
         annotation_text="今天", annotation_position="top left",
     )
@@ -936,7 +937,10 @@ def _render_tasks_with_views(tasks_df: pd.DataFrame, todos_df: pd.DataFrame, cli
 
     with gantt_tab:
         st.markdown('<div class="gantt-wrap">', unsafe_allow_html=True)
-        _render_gantt(tasks_df)
+        try:
+            _render_gantt(tasks_df)
+        except Exception as e:
+            st.warning(f"甘特圖無法顯示：{e}")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with batch_tab:
