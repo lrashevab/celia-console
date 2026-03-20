@@ -121,6 +121,52 @@ def append_todo(todo_row: list, account: str = "work"):
     _append_row(svc, sid, WORK_SHEETS["todos"], todo_row)
 
 
+def update_row_by_id(
+    row_id: str,
+    sheet_key: str,           # "tasks" | "todos" | "clients"
+    updated_fields: dict,     # {column_name: new_value}
+    account: str = "work",
+) -> bool:
+    """
+    找到指定 ID 的 row 並更新指定欄位，回傳是否成功。
+    使用一次 read + 一次 write，避免逐欄更新的 quota 消耗。
+    """
+    svc = get_sheets_service(account)
+    sid = ACCOUNTS[account]["spreadsheet_id"]
+    sheet_name = WORK_SHEETS.get(sheet_key, sheet_key)
+
+    result = svc.spreadsheets().values().get(
+        spreadsheetId=sid, range=sheet_name
+    ).execute()
+    values = result.get("values", [])
+    if len(values) < 2:
+        return False
+
+    headers = values[0]
+    id_col = headers.index("id") if "id" in headers else 0
+
+    for row_idx, row in enumerate(values[1:], start=2):
+        row_ext = row + [""] * max(0, len(headers) - len(row))
+        if row_ext[id_col] != row_id:
+            continue
+        # 更新指定欄位
+        for col_name, new_val in updated_fields.items():
+            if col_name in headers:
+                col_i = headers.index(col_name)
+                while len(row_ext) <= col_i:
+                    row_ext.append("")
+                row_ext[col_i] = str(new_val)
+        # 寫回整行
+        svc.spreadsheets().values().update(
+            spreadsheetId=sid,
+            range=f"{sheet_name}!A{row_idx}",
+            valueInputOption="USER_ENTERED",
+            body={"values": [row_ext]},
+        ).execute()
+        return True
+    return False
+
+
 # ══════════════════════════════════════════════════════
 # 個人帳號 — Personal Data
 # ══════════════════════════════════════════════════════

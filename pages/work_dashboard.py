@@ -488,22 +488,31 @@ def _render_tasks(tasks_df: pd.DataFrame):
             pri   = row.get("priority", "medium").lower()
             due   = row.get("due_date", "")
             dcls  = _due_class(due)
-            confirmed = row.get("confirmed_by_client", "FALSE")
-            confirmed_icon = "✅" if str(confirmed).upper() == "TRUE" else "⏳"
             assigned = row.get("assigned_to", "") or "—"
             account  = row.get("_account", "work")
+            item_id  = row.get("id", "")
+            is_editing = st.session_state.get(f"editing_{item_id}", False)
 
-            st.markdown(f"""
+            col_card, col_btn = st.columns([9, 1])
+            with col_card:
+                st.markdown(f"""
 <div class="task-row {pri}">
     <div>{_priority_dot(pri)}</div>
     <div class="task-title">{row.get('title','—')}</div>
     <span class="task-client">{row.get('client','—')}</span>
     {_account_tag(account)}
-    <span class="badge badge-gray">指派：{assigned}</span>
+    <span class="badge badge-gray">👤 {assigned}</span>
     <span class="task-due {dcls}">📅 {due}</span>
-    <span class="task-confirmed" title="客戶確認">{confirmed_icon}</span>
 </div>
 """, unsafe_allow_html=True)
+            with col_btn:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("✏️", key=f"edit_btn_task_{item_id}", help="編輯", use_container_width=True):
+                    st.session_state[f"editing_{item_id}"] = not is_editing
+                    st.rerun()
+
+            if is_editing:
+                _render_edit_form(row, "tasks")
 
     with tab_done:
         if done_df.empty:
@@ -535,12 +544,16 @@ def _render_todos(todos_df: pd.DataFrame):
         return
 
     for _, row in open_df.iterrows():
-        due  = row.get("due_date", "")
-        dcls = _due_class(due)
+        due     = row.get("due_date", "")
+        dcls    = _due_class(due)
         client_str = f" · {row.get('client','')}" if row.get("client") else ""
         account = row.get("_account", "work")
+        item_id = row.get("id", "")
+        is_editing = st.session_state.get(f"editing_{item_id}", False)
 
-        st.markdown(f"""
+        col_card, col_btn = st.columns([9, 1])
+        with col_card:
+            st.markdown(f"""
 <div class="todo-row">
     <span class="todo-check">☐</span>
     <span class="todo-title">{row.get('title','—')}{client_str}</span>
@@ -548,6 +561,14 @@ def _render_todos(todos_df: pd.DataFrame):
     <span class="todo-due {dcls}">📅 {due}</span>
 </div>
 """, unsafe_allow_html=True)
+        with col_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("✏️", key=f"edit_btn_todo_{item_id}", help="編輯", use_container_width=True):
+                st.session_state[f"editing_{item_id}"] = not is_editing
+                st.rerun()
+
+        if is_editing:
+            _render_edit_form(row, "todos")
 
 
 # ══════════════════════════════════════════════════════
@@ -592,7 +613,6 @@ def _render_cmd_bar(clients_df, tasks_df, todos_df):
             # 第二行：客戶 + 截止日期 + 優先級
             c3, c4, c5 = st.columns([2, 2, 1])
             with c3:
-                # 從現有客戶清單取名稱供選擇（可手動輸入）
                 existing = [""] + sorted(clients_df["name"].dropna().unique().tolist()) if not clients_df.empty else [""]
                 client_select = st.selectbox("客戶（可選）", existing)
                 if client_select == "":
@@ -609,15 +629,23 @@ def _render_cmd_bar(clients_df, tasks_df, todos_df):
                     format_func=lambda x: {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}[x],
                 )
 
-        # 連結區（每行一個，可貼多個）
-        if add_type in ("任務", "待辦"):
-            links_raw = st.text_area(
-                "相關連結（每行一個，可不填）",
-                placeholder="https://figma.com/xxx\nhttps://docs.google.com/yyy",
-                height=72,
-            )
+            # 第三行：負責人 + 連結
+            c6, c7 = st.columns([2, 3])
+            with c6:
+                assigned_to = st.text_input("負責人", value="Celia",
+                                            placeholder="Celia / 外發設計師 / 廠商名稱")
+            with c7:
+                links_raw = st.text_area(
+                    "相關連結（每行一個，可不填）",
+                    placeholder="https://figma.com/xxx\nhttps://docs.google.com/yyy",
+                    height=68,
+                )
+            # 備註
+            notes_input = st.text_input("備註（可選）", placeholder="補充說明、特殊注意事項...")
         else:
+            assigned_to = "Celia"
             links_raw = ""
+            notes_input = ""
 
         # 備註（可選）
         if add_type == "客戶":
@@ -644,17 +672,22 @@ def _render_cmd_bar(clients_df, tasks_df, todos_df):
         try:
             if add_type == "任務":
                 task_id = f"T{uuid.uuid4().hex[:4].upper()}"
+                # notes = links + 備註（以換行分隔）
+                notes_combined = "\n".join(filter(None, [links_str, notes_input.strip()]))
                 row = [task_id, title.strip(), client, "client", "open", priority,
-                       due_date.isoformat(), "Celia", links_str, "FALSE", ""]
+                       due_date.isoformat(), "Celia", assigned_to.strip(), "FALSE", notes_combined]
                 gs.append_task(row, account=account)
-                _add_history("任務", title.strip(), client, due_date.isoformat(), now_str, account)
+                _add_history("任務", title.strip(), client, due_date.isoformat(), now_str, account,
+                             assigned_to=assigned_to.strip(), notes=notes_combined, item_id=task_id)
 
             elif add_type == "待辦":
                 todo_id = f"D{uuid.uuid4().hex[:4].upper()}"
+                notes_combined = "\n".join(filter(None, [links_str, notes_input.strip()]))
                 row = [todo_id, title.strip(), client, "client", "open",
-                       due_date.isoformat(), "Celia", links_str, "FALSE"]
+                       due_date.isoformat(), assigned_to.strip(), notes_combined, "FALSE"]
                 gs.append_todo(row, account=account)
-                _add_history("待辦", title.strip(), client, due_date.isoformat(), now_str, account)
+                _add_history("待辦", title.strip(), client, due_date.isoformat(), now_str, account,
+                             assigned_to=assigned_to.strip(), notes=notes_combined, item_id=todo_id)
 
             elif add_type == "客戶":
                 client_id = f"C{uuid.uuid4().hex[:4].upper()}"
@@ -712,12 +745,16 @@ def _render_cmd_bar(clients_df, tasks_df, todos_df):
 </div>""", unsafe_allow_html=True)
 
 
-def _add_history(type_: str, title: str, client: str, due: str, created_at: str, account: str):
+def _add_history(type_: str, title: str, client: str, due: str, created_at: str, account: str,
+                 assigned_to: str = "Celia", notes: str = "", item_id: str = ""):
     if "add_history" not in st.session_state:
         st.session_state.add_history = []
     st.session_state.add_history.append({
         "type": type_, "title": title, "client": client,
-        "due": due, "created_at": created_at, "account": "🏢" if account == "work" else "🏠",
+        "due": due, "created_at": created_at,
+        "account_raw": account,
+        "account": "🏢" if account == "work" else "🏠",
+        "assigned_to": assigned_to, "notes": notes, "id": item_id,
     })
 
 
@@ -945,6 +982,84 @@ def _render_tasks_with_views(tasks_df: pd.DataFrame, todos_df: pd.DataFrame, cli
 
     with todo_tab:
         _render_todos(todos_df)
+
+
+# ══════════════════════════════════════════════════════
+# Inline 編輯表單
+# ══════════════════════════════════════════════════════
+def _render_edit_form(row: pd.Series, sheet_key: str):
+    """展開 inline 編輯表單，儲存後更新 Google Sheets"""
+    item_id  = row.get("id", "")
+    account  = row.get("_account", "work")
+    status_opts   = ["open", "in-progress", "completed", "cancelled"]
+    priority_opts = ["medium", "high", "low"]
+
+    with st.form(f"edit_{sheet_key}_{item_id}", clear_on_submit=False):
+        ea, eb = st.columns([3, 1])
+        with ea:
+            new_title = st.text_input("名稱", value=row.get("title", ""))
+        with eb:
+            cur_status = row.get("status", "open")
+            new_status = st.selectbox("狀態", status_opts,
+                                      index=status_opts.index(cur_status) if cur_status in status_opts else 0)
+
+        ec, ed, ee = st.columns([2, 2, 1])
+        with ec:
+            new_client = st.text_input("客戶", value=row.get("client", ""))
+        with ed:
+            new_assigned = st.text_input("負責人", value=row.get("assigned_to", ""))
+        with ee:
+            if sheet_key == "tasks":
+                cur_pri = row.get("priority", "medium")
+                new_priority = st.selectbox(
+                    "優先", priority_opts,
+                    index=priority_opts.index(cur_pri) if cur_pri in priority_opts else 0,
+                    format_func=lambda x: {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}[x],
+                )
+            else:
+                new_priority = None
+
+        ef, eg = st.columns([2, 3])
+        with ef:
+            try:
+                due_val = date.fromisoformat(row.get("due_date", TODAY.isoformat()))
+            except Exception:
+                due_val = TODAY
+            new_due = st.date_input("截止日期", value=due_val)
+        with eg:
+            new_notes = st.text_area("備註 / 連結", value=row.get("notes", ""), height=68)
+
+        cs, cc = st.columns(2)
+        with cs:
+            saved = st.form_submit_button("💾 儲存", type="primary", use_container_width=True)
+        with cc:
+            cancelled = st.form_submit_button("✖ 取消", use_container_width=True)
+
+    if cancelled:
+        st.session_state.pop(f"editing_{item_id}", None)
+        st.rerun()
+
+    if saved and new_title.strip():
+        fields = {
+            "title": new_title.strip(),
+            "client": new_client.strip(),
+            "assigned_to": new_assigned.strip(),
+            "due_date": new_due.isoformat(),
+            "status": new_status,
+            "notes": new_notes.strip(),
+        }
+        if new_priority:
+            fields["priority"] = new_priority
+        try:
+            ok = gs.update_row_by_id(item_id, sheet_key, fields, account=account)
+            if ok:
+                st.success("✅ 已更新！")
+                st.session_state.pop(f"editing_{item_id}", None)
+                st.rerun()
+            else:
+                st.error(f"找不到 ID={item_id} 的項目，請確認 Sheets 資料。")
+        except Exception as e:
+            st.error(f"更新失敗：{e}")
 
 
 def _find_matching_tasks(tasks_df, todos_df, hint: str) -> str:
