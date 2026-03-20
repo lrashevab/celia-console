@@ -102,9 +102,10 @@ WORK_CSS = """
     border-radius: 50%;
     margin-right: 6px;
 }
-.priority-high   { background: #ef4444; }
-.priority-medium { background: #f59e0b; }
-.priority-low    { background: #10b981; }
+.priority-high      { background: #ef4444; }
+.priority-medium    { background: #f59e0b; }
+.priority-low       { background: #10b981; }
+.priority-scheduled { background: #8b5cf6; }
 
 /* ── 客戶卡片 ── */
 .client-card {
@@ -153,9 +154,10 @@ WORK_CSS = """
     gap: 12px;
     transition: border-left-color 0.2s;
 }
-.task-row.high   { border-left-color: #ef4444; }
-.task-row.medium { border-left-color: #f59e0b; }
-.task-row.low    { border-left-color: #10b981; }
+.task-row.high      { border-left-color: #ef4444; }
+.task-row.medium    { border-left-color: #f59e0b; }
+.task-row.low       { border-left-color: #10b981; }
+.task-row.scheduled { border-left-color: #8b5cf6; background: #faf5ff; }
 .task-title {
     flex: 1;
     font-size: 0.88rem;
@@ -349,7 +351,7 @@ CONTRACT_BADGE = {
     "已完成": ("badge-gray",   "已完成"),
     "暫停":   ("badge-blue",   "暫停"),
 }
-PRIORITY_CLASS = {"high": "high", "medium": "medium", "low": "low"}
+PRIORITY_CLASS = {"high": "high", "medium": "medium", "low": "low", "scheduled": "scheduled"}
 TODAY = date.today()
 
 
@@ -359,7 +361,10 @@ def _contract_badge(status: str) -> str:
 
 
 def _priority_dot(priority: str) -> str:
-    cls = PRIORITY_CLASS.get(priority.lower(), "medium")
+    p = priority.lower()
+    if p == "scheduled":
+        return '<span style="font-size:0.85rem;margin-right:4px" title="預訂日程">🗓</span>'
+    cls = PRIORITY_CLASS.get(p, "medium")
     return f'<span class="priority-dot priority-{cls}"></span>'
 
 
@@ -625,8 +630,11 @@ def _render_cmd_bar(clients_df, tasks_df, todos_df):
             with c5:
                 priority = st.selectbox(
                     "優先",
-                    ["medium", "high", "low"],
-                    format_func=lambda x: {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}[x],
+                    ["medium", "high", "low", "scheduled"],
+                    format_func=lambda x: {
+                        "high": "🔴 高", "medium": "🟡 中",
+                        "low": "🟢 低", "scheduled": "🗓 預訂日程"
+                    }[x],
                 )
 
             # 第三行：負責人 + 連結
@@ -869,7 +877,11 @@ def _render_gantt(tasks_df: pd.DataFrame):
 # 批次時程匯入
 # ══════════════════════════════════════════════════════
 def _parse_timeline_text(text: str) -> list:
-    """解析多行時程文字 → [{date, title, client}, ...]"""
+    """解析多行時程文字 → [{date, title, client, assigned_to}, ...]
+    支援格式：
+      M/D (週X) 任務描述 @負責人
+      M/D 任務描述給客戶 @負責人
+    """
     items = []
     year = TODAY.year
     for line in text.strip().splitlines():
@@ -885,36 +897,61 @@ def _parse_timeline_text(text: str) -> list:
             task_date = date(year, month, day)
         except (ValueError, OverflowError):
             continue
-        # 嘗試從描述提取客戶：「給XX」或描述開頭的機構名
+        # 解析 @負責人（在描述末尾）
+        assigned_to = ""
+        am = re.search(r"@([\w\u4e00-\u9fff]+)", desc)
+        if am:
+            assigned_to = am.group(1)
+            desc = desc[:am.start()].strip()
+        # 解析客戶：「給XX」
         client = ""
-        cm = re.search(r"給([^\s，,。（(＆&]+)", desc)
+        cm = re.search(r"給([^\s，,。（(＆&@]+)", desc)
         if cm:
             client = cm.group(1).strip()
-        items.append({"date": task_date, "title": desc, "client": client})
+        items.append({"date": task_date, "title": desc, "client": client, "assigned_to": assigned_to})
     return items
 
 
 def _render_batch_import(clients_df: pd.DataFrame):
     st.markdown("**📥 批次匯入時程**")
-    st.caption("每行格式：`M/D (週X) 任務描述`，例如：`3/26 (四) 視覺風格方向提案給宇光森`")
+    st.caption(
+        "每行格式：`M/D (週X) 任務描述 @負責人`　　"
+        "例：`3/26 (四) 視覺風格方向提案給宇光森 @Celia`\n\n"
+        "（`@負責人` 可省略，省略時套用下方統一負責人設定）"
+    )
 
     raw = st.text_area(
         "貼入時程文字",
-        placeholder="3/26 (四) 視覺風格方向提案給宇光森\n3/27 (五) 宇光森提供給客戶\n3/30 (一) 客戶回饋",
-        height=140,
+        placeholder=(
+            "3/26 (四) 視覺風格方向提案給宇光森 @Celia\n"
+            "3/27 (五) 宇光森提供給客戶\n"
+            "3/30 (一) 客戶回饋\n"
+            "4/2 (四) 第一次設計提案提供給宇光森＆宇光森給予回饋 @設計師"
+        ),
+        height=150,
         label_visibility="collapsed",
     )
 
-    # 預設客戶 + 帳號
-    col_a, col_b, col_c = st.columns([2, 2, 1])
+    col_a, col_b, col_c, col_d = st.columns([2, 2, 2, 1])
     with col_a:
         existing = ["（由描述自動判斷）"] + sorted(clients_df["name"].dropna().unique().tolist()) if not clients_df.empty else ["（由描述自動判斷）"]
         default_client = st.selectbox("統一指定客戶（可選）", existing, key="batch_client")
     with col_b:
-        default_priority = st.selectbox("優先級", ["medium", "high", "low"],
-                                        format_func=lambda x: {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}[x],
-                                        key="batch_priority")
+        default_assigned = st.text_input("統一負責人", value="Celia",
+                                         placeholder="Celia / 外發設計師",
+                                         key="batch_assigned",
+                                         help="若行內已寫 @負責人 則以行內為準")
     with col_c:
+        default_priority = st.selectbox(
+            "優先級",
+            ["scheduled", "medium", "high", "low"],
+            format_func=lambda x: {
+                "scheduled": "🗓 預訂日程", "high": "🔴 高",
+                "medium": "🟡 中", "low": "🟢 低"
+            }[x],
+            key="batch_priority",
+        )
+    with col_d:
         batch_account = st.selectbox("帳號", ["work", "personal"],
                                      format_func=lambda x: "🏢 工作" if x == "work" else "🏠 接案",
                                      key="batch_account")
@@ -924,27 +961,29 @@ def _render_batch_import(clients_df: pd.DataFrame):
 
     items = _parse_timeline_text(raw)
     if not items:
-        st.warning("無法解析，請確認格式。")
+        st.warning("無法解析，請確認格式（每行需以 M/D 開頭）。")
         return
 
     # 預覽
     st.markdown(f"**解析結果（{len(items)} 筆）**")
     for it in items:
-        client_show = (default_client if default_client != "（由描述自動判斷）" else it["client"]) or "—"
+        client_show = (default_client if default_client != "（由描述自動判斷）" else it.get("client", "")) or "—"
+        person_show = it.get("assigned_to") or default_assigned or "Celia"
         st.markdown(f"""
 <div class="batch-preview-row">
   <span class="batch-date">{it['date'].strftime('%m/%d')}</span>
   <span class="batch-title">{it['title']}</span>
-  <span class="batch-client">👤 {client_show}</span>
+  <span class="batch-client">👤 {person_show} · 🏢 {client_show}</span>
 </div>""", unsafe_allow_html=True)
 
     if st.button("✅ 全部匯入為任務", type="primary", use_container_width=True, key="batch_submit"):
         success, fail = 0, 0
         for it in items:
-            client = (default_client if default_client != "（由描述自動判斷）" else it["client"])
+            client = (default_client if default_client != "（由描述自動判斷）" else it.get("client", ""))
+            person = it.get("assigned_to") or default_assigned or "Celia"
             task_id = f"T{uuid.uuid4().hex[:4].upper()}"
             row = [task_id, it["title"], client, "client", "open",
-                   default_priority, it["date"].isoformat(), "Celia", "", "FALSE", ""]
+                   default_priority, it["date"].isoformat(), "Celia", person, "FALSE", ""]
             try:
                 gs.append_task(row, account=batch_account)
                 success += 1
@@ -1010,11 +1049,15 @@ def _render_edit_form(row: pd.Series, sheet_key: str):
             new_assigned = st.text_input("負責人", value=row.get("assigned_to", ""))
         with ee:
             if sheet_key == "tasks":
+                priority_opts_ext = ["medium", "high", "low", "scheduled"]
                 cur_pri = row.get("priority", "medium")
                 new_priority = st.selectbox(
-                    "優先", priority_opts,
-                    index=priority_opts.index(cur_pri) if cur_pri in priority_opts else 0,
-                    format_func=lambda x: {"high": "🔴 高", "medium": "🟡 中", "low": "🟢 低"}[x],
+                    "優先", priority_opts_ext,
+                    index=priority_opts_ext.index(cur_pri) if cur_pri in priority_opts_ext else 0,
+                    format_func=lambda x: {
+                        "high": "🔴 高", "medium": "🟡 中",
+                        "low": "🟢 低", "scheduled": "🗓 預訂日程"
+                    }[x],
                 )
             else:
                 new_priority = None
