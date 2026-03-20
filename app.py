@@ -85,7 +85,7 @@ with st.sidebar:
     # 模式切換
     mode = st.selectbox(
         "切換模式",
-        ["🤖 Claude Code 指揮中心", "🏢 工作（廣告行銷）", "🏠 個人生活"],
+        ["🤖 Claude Code 指揮中心", "🏢 工作指揮室", "📅 會議記錄", "🏠 個人生活"],
         key="mode_selector",
     )
 
@@ -96,6 +96,9 @@ with st.sidebar:
     elif "工作" in mode:
         st.success("🟢 工作模式 — 工作帳號")
         st.caption("資料來源：Google Sheets（工作帳號）")
+    elif "會議" in mode:
+        st.success("🟢 工作模式 — 工作帳號")
+        st.caption("逐字稿 → AI 結構化 → Google Calendar")
     else:
         st.info("🔵 個人模式 — 個人帳號")
         st.caption("資料來源：Google Sheets（個人帳號）\n📔 日記：本地存儲")
@@ -138,6 +141,9 @@ if "Claude" in mode:
 elif "工作" in mode:
     from pages.work_dashboard import render as work_render
     work_render()
+elif "會議" in mode:
+    from pages.meeting_page import render as meeting_render
+    meeting_render()
 else:
     from pages.personal_dashboard import render as personal_render
     personal_render()
