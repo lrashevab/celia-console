@@ -57,4 +57,10 @@ DIARY_PATH.mkdir(parents=True, exist_ok=True)
 
 # ── Anthropic ────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL      = "claude-sonnet-4-6"
+
+# ── Google Gemini（免費 API：aistudio.google.com）────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# ── Tavily 搜尋 ───────────────────────────────────────
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")

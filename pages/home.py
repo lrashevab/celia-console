@@ -196,17 +196,23 @@ def _render_xhs_pipeline():
     st.caption("4 步驟自動化 Pipeline：搜尋熱點 → AI 撰文 → 格式適配 → 發佈")
 
     # ── 環境狀態 ──────────────────────────────────────
-    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY", ""))
-    has_tavily    = bool(os.environ.get("TAVILY_API_KEY", ""))
-    has_xhs       = bool(os.environ.get("XHS_COOKIE", ""))
+    from services.llm_client import active_provider, provider_label
+    has_llm   = active_provider() is not None
+    has_tavily = bool(os.environ.get("TAVILY_API_KEY", ""))
+    has_xhs    = bool(os.environ.get("XHS_COOKIE", ""))
 
     with st.expander("⚙️ 環境狀態", expanded=False):
-        c1, c2, c3 = st.columns(3)
-        with c1: st.markdown(f"{'✅' if has_anthropic else '❌'} Claude API{'（已設定）' if has_anthropic else '（未設定）'}")
-        with c2: st.markdown(f"{'✅' if has_tavily else '⚠️'} Tavily 搜尋{'（已設定）' if has_tavily else '（未設定，可手動貼入）'}")
-        with c3: st.markdown(f"{'✅' if has_xhs else '⚠️'} 小紅書發佈{'（已設定）' if has_xhs else '（未設定，輸出複製格式）'}")
-        if not has_anthropic:
-            st.error("請在 .env 設定 `ANTHROPIC_API_KEY` 才能生成文章。")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.markdown(provider_label())
+        with c2: st.markdown(f"{'✅' if has_tavily else '⚠️'} Tavily {'已設定' if has_tavily else '未設定，可手動貼入'}")
+        with c3: st.markdown(f"{'✅' if has_xhs else '⚠️'} 小紅書發佈 {'已設定' if has_xhs else '未設定'}")
+        with c4: st.markdown("✅ 封面圖生成（Pollinations.ai，免費）")
+        if not has_llm:
+            st.error(
+                "未設定 LLM API Key。請擇一：\n"
+                "- **Gemini（免費）**：到 https://aistudio.google.com/apikey 取得，設定 `GEMINI_API_KEY=xxx`\n"
+                "- **Anthropic**：設定 `ANTHROPIC_API_KEY=sk-ant-xxx`"
+            )
 
     st.divider()
 
@@ -233,7 +239,7 @@ def _render_xhs_pipeline():
             )
 
     run_btn = st.button("🚀 開始生成", type="primary",
-                        disabled=not topic or not has_anthropic,
+                        disabled=not topic or not has_llm,
                         key="xhs_run")
 
     st.divider()
@@ -365,16 +371,83 @@ def _render_xhs_pipeline():
     topics_str = "  ".join(f"`#{t}`" for t in formatted["topics"])
     st.markdown(topics_str)
 
-    # 圖片預覽
-    if formatted["images"]:
-        st.markdown("**圖片**")
-        img_cols = st.columns(min(len(formatted["images"]), 4))
-        for i, url in enumerate(formatted["images"]):
-            with img_cols[i]:
-                try:
-                    st.image(url, use_container_width=True)
-                except Exception:
-                    st.caption(f"[圖片 {i+1}]({url})")
+    # ── 封面圖生成（Pollinations.ai 免費）────────────
+    st.markdown("**🖼️ 封面圖生成**")
+    from services.image_generator import (
+        build_xhs_prompt, generate_cover_variants, MODELS,
+    )
+
+    with st.expander("封面圖設定", expanded=True):
+        cover_col1, cover_col2, cover_col3 = st.columns([3, 2, 2])
+        with cover_col1:
+            custom_cover_prompt = st.text_input(
+                "圖片描述（留空自動生成）",
+                placeholder="例：AI 工具使用場景，科技感，暗色背景",
+                key="xhs_cover_prompt",
+            )
+        with cover_col2:
+            cover_style = st.selectbox(
+                "封面風格",
+                ["modern", "warm", "bold", "minimal"],
+                format_func=lambda s: {
+                    "modern": "🔵 現代科技感",
+                    "warm":   "🟠 溫暖生活感",
+                    "bold":   "🔴 爆款大字報",
+                    "minimal":"⚪ 極簡白底",
+                }[s],
+                key="xhs_cover_style",
+            )
+        with cover_col3:
+            cover_model = st.selectbox(
+                "AI 模型",
+                list(MODELS.keys()),
+                format_func=lambda k: MODELS[k],
+                key="xhs_cover_model",
+            )
+            cover_count = st.number_input("生成幾張", min_value=1, max_value=4, value=3,
+                                          key="xhs_cover_count")
+
+        if st.button("🎨 生成封面圖", key="xhs_gen_cover"):
+            if custom_cover_prompt:
+                prompt = custom_cover_prompt
+            else:
+                prompt = build_xhs_prompt(
+                    title    = formatted["title"],
+                    topic    = st.session_state.get("xhs_topic", "AI工具"),
+                    keywords = formatted["topics"][:3],
+                    style    = cover_style,
+                )
+            with st.spinner(f"生成 {cover_count} 張封面圖（免費，約 5-15 秒）..."):
+                urls = generate_cover_variants(
+                    prompt, count=cover_count, model=cover_model
+                )
+            st.session_state["xhs_cover_urls"] = urls
+            st.session_state["xhs_cover_prompt_used"] = prompt
+
+        # 顯示生成的封面圖
+        cover_urls = st.session_state.get("xhs_cover_urls", [])
+        if cover_urls:
+            st.caption(f"點擊圖片右鍵 → 複製圖片位址，可直接貼到小紅書發文")
+            img_cols = st.columns(len(cover_urls))
+            for i, url in enumerate(cover_urls):
+                with img_cols[i]:
+                    try:
+                        st.image(url, caption=f"封面 {i+1}", use_container_width=True)
+                        st.markdown(f"[🔗 原始連結]({url})")
+                    except Exception:
+                        st.markdown(f"[封面 {i+1}（點擊開啟）]({url})")
+            with st.expander("📋 使用的圖片提示詞（可複製到 Midjourney / Canva AI）"):
+                st.code(st.session_state.get("xhs_cover_prompt_used", ""), language="text")
+        elif formatted["images"]:
+            # 搜尋來的圖片作為備選
+            st.caption("以下為搜尋找到的圖片（按上方按鈕可生成 AI 封面）")
+            img_cols = st.columns(min(len(formatted["images"]), 4))
+            for i, url in enumerate(formatted["images"]):
+                with img_cols[i]:
+                    try:
+                        st.image(url, use_container_width=True)
+                    except Exception:
+                        st.caption(f"[圖片 {i+1}]({url})")
 
     # 完整文章
     st.markdown("**完整文章**")

@@ -351,8 +351,9 @@ def _draft_heuristic(session: dict) -> dict:
 
 
 def _draft_with_claude(session: dict, api_key: str) -> dict:
-    """有 API Key 時用 Claude 萃取結構化欄位"""
-    import anthropic, json as _json
+    """有 LLM 時用 AI 萃取結構化欄位（Gemini 或 Claude）"""
+    from services.llm_client import generate
+    import json as _json
 
     commits = [_clean_commit(c) for c in session.get("recent_commits", [])[:5]]
     files   = session.get("changed_files", [])[:8]
@@ -377,14 +378,13 @@ def _draft_with_claude(session: dict, api_key: str) -> dict:
 
 只回傳 JSON，不要任何說明文字。"""
 
-    client = anthropic.Anthropic(api_key=api_key)
-    resp   = client.messages.create(
-        model="claude-haiku-4-5-20251001",  # 用 Haiku 節省成本
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = resp.content[0].text.strip()
+    try:
+        text = generate("", prompt, max_tokens=400)
+    except Exception:
+        return _draft_heuristic(session)
+
     # 去掉可能的 markdown code block
+    text = text.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
@@ -426,12 +426,11 @@ def generate_social_post(sessions: list, format_type: str = "threads") -> str:
 
 
 def _generate_with_claude(sessions: list, format_type: str, api_key: str) -> str:
-    """有 API Key 時使用 Claude API 生成（品質更高，使用結構化素材）"""
-    import anthropic
+    """使用統一 LLM Client 生成（Gemini 優先，fallback Claude）"""
+    from services.llm_client import generate
 
     kw = _extract_keywords(sessions)
 
-    # 組裝結構化素材（比直接丟 commits 有效得多）
     context_parts = []
     for s in sessions:
         parts = [f"【專案】{s.get('project_name', '')}"]
@@ -443,7 +442,6 @@ def _generate_with_claude(sessions: list, format_type: str, api_key: str) -> str
         context_parts.append("\n".join(parts))
 
     context = "\n\n---\n\n".join(context_parts)
-    client  = anthropic.Anthropic(api_key=api_key)
 
     if format_type == "threads":
         system = """你是台灣的設計師/接案工作者，每天用 Claude Code 做開發，在 Threads 上分享真實工作狀態。
@@ -466,10 +464,4 @@ def _generate_with_claude(sessions: list, format_type: str, api_key: str) -> str
 5. 結尾問句引導留言互動
 6. 不說「一個人可以頂以前好幾倍」這種空話，要具體說做了什麼"""
 
-    resp = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=700,
-        system=system,
-        messages=[{"role": "user", "content": f"根據以下活動素材生成文章：\n\n{context}"}],
-    )
-    return resp.content[0].text
+    return generate(system, f"根據以下活動素材生成文章：\n\n{context}", max_tokens=700)
