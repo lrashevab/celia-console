@@ -164,6 +164,254 @@ def _field_label(icon: str, label: str, hint: str = "") -> str:
     return f'<span style="font-size:0.78rem;font-weight:700;color:#475569">{icon} {label}{hint_html}</span>'
 
 
+def _step_badge(n: int, label: str, state: str) -> str:
+    """state: 'pending' | 'running' | 'done' | 'error'"""
+    colors = {
+        "pending": ("#e2e8f0", "#94a3b8"),
+        "running": ("#dbeafe", "#1e40af"),
+        "done":    ("#dcfce7", "#166534"),
+        "error":   ("#fee2e2", "#991b1b"),
+    }
+    icons = {"pending": "○", "running": "⟳", "done": "✓", "error": "✕"}
+    bg, fg = colors.get(state, colors["pending"])
+    icon   = icons.get(state, "○")
+    return (
+        f'<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;'
+        f'background:{bg};border-radius:10px;margin-bottom:8px;">'
+        f'<span style="font-size:1rem;font-weight:800;color:{fg}">{icon}</span>'
+        f'<span style="font-size:0.88rem;font-weight:600;color:{fg}">Step {n} — {label}</span>'
+        f'</div>'
+    )
+
+
+def _render_xhs_pipeline():
+    """小紅書爆款內容生成 Pipeline — 4 步驟 UI"""
+    from services.xhs_pipeline import (
+        step1_research, step2_generate_stream, step2_generate,
+        step3_format, step4_publish_package,
+    )
+    import os, json as _json
+
+    st.subheader("🔥 小紅書爆款生成器")
+    st.caption("4 步驟自動化 Pipeline：搜尋熱點 → AI 撰文 → 格式適配 → 發佈")
+
+    # ── 環境狀態 ──────────────────────────────────────
+    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY", ""))
+    has_tavily    = bool(os.environ.get("TAVILY_API_KEY", ""))
+    has_xhs       = bool(os.environ.get("XHS_COOKIE", ""))
+
+    with st.expander("⚙️ 環境狀態", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1: st.markdown(f"{'✅' if has_anthropic else '❌'} Claude API{'（已設定）' if has_anthropic else '（未設定）'}")
+        with c2: st.markdown(f"{'✅' if has_tavily else '⚠️'} Tavily 搜尋{'（已設定）' if has_tavily else '（未設定，可手動貼入）'}")
+        with c3: st.markdown(f"{'✅' if has_xhs else '⚠️'} 小紅書發佈{'（已設定）' if has_xhs else '（未設定，輸出複製格式）'}")
+        if not has_anthropic:
+            st.error("請在 .env 設定 `ANTHROPIC_API_KEY` 才能生成文章。")
+
+    st.divider()
+
+    # ── 參數輸入 ──────────────────────────────────────
+    col_topic, col_days = st.columns([4, 2])
+    with col_topic:
+        topic = st.text_input(
+            "主題 / 關鍵字",
+            placeholder="例：Claude Code AI 開發工具、設計師用 AI 提升效率",
+            key="xhs_topic",
+        )
+    with col_days:
+        search_days = st.selectbox("搜尋範圍", [7, 14, 30], index=1, key="xhs_days",
+                                   format_func=lambda d: f"最近 {d} 天")
+
+    # 手動貼入（當 Tavily 未配置）
+    manual_ref = ""
+    if not has_tavily:
+        with st.expander("📋 手動貼入參考資料（無 Tavily API 時使用）"):
+            manual_ref = st.text_area(
+                "參考資料",
+                placeholder="把你想參考的文章、資料貼在這裡，AI 會基於這些來撰文",
+                height=120, key="xhs_manual_ref",
+            )
+
+    run_btn = st.button("🚀 開始生成", type="primary",
+                        disabled=not topic or not has_anthropic,
+                        key="xhs_run")
+
+    st.divider()
+
+    # ── Pipeline 步驟狀態 ─────────────────────────────
+    step_states = {1: "pending", 2: "pending", 3: "pending", 4: "pending"}
+    step_labels = {
+        1: "信息檢索",
+        2: "撰寫文章",
+        3: "格式適配",
+        4: "發佈準備",
+    }
+    step_placeholders = {i: st.empty() for i in range(1, 5)}
+    result_area = st.empty()
+
+    def _render_steps():
+        for i in range(1, 5):
+            step_placeholders[i].markdown(
+                _step_badge(i, step_labels[i], step_states[i]),
+                unsafe_allow_html=True
+            )
+
+    _render_steps()
+
+    if not run_btn:
+        return
+
+    # ══ 執行 Pipeline ═══════════════════════════════
+    # Step 1 — 信息檢索
+    step_states[1] = "running"
+    _render_steps()
+
+    if has_tavily:
+        research = step1_research(topic, search_days)
+    else:
+        research = {
+            "articles": [{"title": "手動資料", "url": "", "content": manual_ref, "score": 1}]
+                        if manual_ref else [],
+            "images":   [],
+            "query":    topic,
+            "source":   "manual",
+        }
+
+    if research.get("error"):
+        step_states[1] = "error"
+        _render_steps()
+        st.error(f"搜尋失敗：{research['error']}")
+        return
+
+    step_states[1] = "done"
+    _render_steps()
+
+    art_count = len(research.get("articles", []))
+    img_count = len(research.get("images", []))
+    with result_area.container():
+        if art_count:
+            st.success(f"✅ 找到 {art_count} 篇參考資料、{img_count} 張圖片")
+            with st.expander("查看搜尋結果"):
+                for a in research["articles"][:4]:
+                    st.markdown(f"- **{a['title']}**  \n  {a['content'][:80]}...")
+        else:
+            st.info("無搜尋結果，將基於主題直接生成")
+
+    # Step 2 — 撰寫文章（streaming）
+    step_states[2] = "running"
+    _render_steps()
+
+    article_container = st.empty()
+    full_article = ""
+
+    with article_container.container():
+        st.markdown("**✍️ 正在撰寫...**")
+        article_stream_placeholder = st.empty()
+        try:
+            for chunk in step2_generate_stream(topic, research):
+                full_article += chunk
+                # 每 30 個字元更新一次顯示（避免過度刷新）
+                if len(full_article) % 30 == 0:
+                    article_stream_placeholder.markdown(
+                        full_article + " ▌", unsafe_allow_html=False
+                    )
+            article_stream_placeholder.markdown(full_article)
+        except Exception as e:
+            step_states[2] = "error"
+            _render_steps()
+            st.error(f"文章生成失敗：{e}")
+            return
+
+    step_states[2] = "done"
+    _render_steps()
+
+    # Step 3 — 格式適配
+    step_states[3] = "running"
+    _render_steps()
+
+    formatted = step3_format(full_article, research.get("images", []))
+    step_states[3] = "done"
+    _render_steps()
+
+    # Step 4 — 發佈包
+    step_states[4] = "running"
+    _render_steps()
+
+    package = step4_publish_package(formatted)
+    step_states[4] = "done"
+    _render_steps()
+
+    st.divider()
+
+    # ── 結果呈現 ─────────────────────────────────────
+    st.markdown("## 📦 生成結果")
+
+    # 標題 + 指標
+    col_title, col_wc, col_img = st.columns([4, 2, 2])
+    with col_title:
+        st.markdown(f"### {formatted['title'] or '（標題待填）'}")
+    with col_wc:
+        wc = formatted["word_count"]
+        ok = formatted["within_limit"]
+        st.metric("字數", wc, delta=None,
+                  help="目標 800-1200 字")
+        if not ok:
+            st.caption("⚠️ 字數超出範圍，可手動調整")
+    with col_img:
+        st.metric("有效圖片", f"{len(formatted['images'])} 張")
+
+    # 話題標籤
+    st.markdown("**話題標籤**（5 個）")
+    topics_str = "  ".join(f"`#{t}`" for t in formatted["topics"])
+    st.markdown(topics_str)
+
+    # 圖片預覽
+    if formatted["images"]:
+        st.markdown("**圖片**")
+        img_cols = st.columns(min(len(formatted["images"]), 4))
+        for i, url in enumerate(formatted["images"]):
+            with img_cols[i]:
+                try:
+                    st.image(url, use_container_width=True)
+                except Exception:
+                    st.caption(f"[圖片 {i+1}]({url})")
+
+    # 完整文章
+    st.markdown("**完整文章**")
+    edited_content = st.text_area(
+        "可直接在此編輯",
+        value=formatted["content"],
+        height=400,
+        label_visibility="collapsed",
+        key="xhs_final_content",
+    )
+
+    # JSON 輸出
+    with st.expander("📋 標準 JSON（可直接貼入 XHS API / MCP）"):
+        display_package = {k: v for k, v in package.items() if k != "meta"}
+        display_package["content"] = edited_content  # 用編輯後版本
+        st.code(_json.dumps(display_package, ensure_ascii=False, indent=2), language="json")
+
+    # 發佈狀態
+    st.divider()
+    if package["status"] == "published":
+        st.success(f"✅ 已成功發佈到小紅書！")
+    else:
+        st.info("📤 尚未自動發佈（未設定 XHS_COOKIE）。請複製上方 JSON 或文章內容手動發佈。")
+        col_copy1, col_copy2 = st.columns(2)
+        with col_copy1:
+            if st.button("📋 複製文章（純文字）", key="xhs_copy_plain"):
+                st.code(edited_content, language="text")
+        with col_copy2:
+            if st.button("📋 複製小紅書格式", key="xhs_copy_xhs"):
+                xhs_format = (
+                    f"{formatted['title']}\n\n"
+                    f"{edited_content}\n\n"
+                    + " ".join(f"#{t}" for t in formatted["topics"])
+                )
+                st.code(xhs_format, language="text")
+
+
 def _char_counter(text: str, limit: int) -> str:
     n   = len(text)
     cls = "over" if n > limit else ("warn" if n > limit * 0.85 else "")
@@ -195,8 +443,8 @@ def render():
 
     st.divider()
 
-    tab_projects, tab_timeline, tab_content = st.tabs([
-        "📁 進行中專案", "📅 每日活動紀錄", "✍️ 生成文章",
+    tab_projects, tab_timeline, tab_content, tab_xhs = st.tabs([
+        "📁 進行中專案", "📅 每日活動紀錄", "✍️ 日誌發文", "🔥 爆款生成器",
     ])
 
     # ════════════════ Tab 1：專案總覽 ════════════════
@@ -592,3 +840,7 @@ def render():
                 save_sessions(sessions)
                 st.success("已標記！")
                 st.rerun()
+
+    # ════════════════ Tab 4：爆款生成器 ══════════════
+    with tab_xhs:
+        _render_xhs_pipeline()
