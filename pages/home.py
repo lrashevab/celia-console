@@ -281,6 +281,44 @@ def render():
                                     st.code(c, language="text")
 
                         st.divider()
+
+                        # ── AI 初稿按鈕 ──────────────────────────
+                        draft_key = f"drafted_{sid}_{idx}"
+                        col_ai, col_hint = st.columns([2, 5])
+                        with col_ai:
+                            if st.button("🤖 AI 幫我初稿", key=f"draft_btn_{sid}_{idx}",
+                                         help="根據 commits 和異動檔案，自動填寫下方欄位（可再修改）"):
+                                with st.spinner("分析中..."):
+                                    try:
+                                        from services.content_generator import draft_session_fields
+                                        draft = draft_session_fields(s)
+                                    except Exception as e:
+                                        draft = {}
+                                        st.error(f"初稿失敗：{e}")
+                                if draft:
+                                    # 把結果寫入 session_state，對應各 widget 的 key
+                                    if draft.get("summary"):
+                                        st.session_state[f"sum_{sid}_{idx}"] = draft["summary"]
+                                    if draft.get("challenge"):
+                                        st.session_state[f"chl_{sid}_{idx}"] = draft["challenge"]
+                                    if draft.get("insight"):
+                                        st.session_state[f"ins_{sid}_{idx}"] = draft["insight"]
+                                    # mood / angle：只在欄位尚未填寫時覆蓋
+                                    if draft.get("mood") and not s.get("mood"):
+                                        mood_options = [f"{e} {l}" for e, l in MOOD_OPTIONS]
+                                        if draft["mood"] in mood_options:
+                                            st.session_state[f"mood_{sid}_{idx}"] = draft["mood"]
+                                    if draft.get("post_angle") and not s.get("post_angle"):
+                                        if draft["post_angle"] in list(ANGLE_OPTIONS.keys()):
+                                            st.session_state[f"ang_{sid}_{idx}"] = draft["post_angle"]
+                                    st.session_state[draft_key] = True
+                                    st.rerun()
+                        with col_hint:
+                            if st.session_state.get(draft_key):
+                                st.success("✅ 初稿已填入，請確認並調整後再發文")
+                            else:
+                                st.caption("沒有 API Key 時會用 commits 規則萃取；有 API Key 會更準")
+
                         st.markdown("**✏️ 填寫發文素材**（讓 AI 生成有靈魂的文章）")
 
                         # ── ① 做了什麼 ──

@@ -247,6 +247,154 @@ def _generate_xiaohongshu(kw: dict) -> str:
 # ══════════════════════════════════════════════════
 # 主要入口
 # ══════════════════════════════════════════════════
+def draft_session_fields(session: dict) -> dict:
+    """
+    從單筆 session 的原始資料（commits / changed_files / tags）
+    自動初稿 5 個發文素材欄位。
+    有 ANTHROPIC_API_KEY → Claude API；沒有 → 規則萃取。
+    回傳 dict: { summary, challenge, insight, mood, post_angle }
+    """
+    # 取得 API key
+    api_key = ""
+    try:
+        import os
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            from config.settings import ANTHROPIC_API_KEY as cfg_key
+            api_key = cfg_key
+    except Exception:
+        pass
+
+    if api_key and api_key.startswith("sk-ant"):
+        return _draft_with_claude(session, api_key)
+    else:
+        return _draft_heuristic(session)
+
+
+def _draft_heuristic(session: dict) -> dict:
+    """無 API Key 時的規則萃取（從 commits + changed_files）"""
+    commits = [_clean_commit(c) for c in session.get("recent_commits", [])[:4]]
+    files   = session.get("changed_files", [])
+    project = session.get("project_name", "此專案")
+
+    # ── summary：用最近 1-2 筆 commit 的訊息 ──────────
+    if commits:
+        # 去掉版本號與括號描述，保留核心語意
+        main = commits[0]
+        # 若多個 commit，附上簡短說明
+        if len(commits) > 1:
+            summary = f"{main}（另含 {len(commits)-1} 個相關更新）"
+        else:
+            summary = main
+    else:
+        summary = f"在 {project} 上推進了幾個功能"
+
+    # ── challenge：偵測踩坑關鍵字 ─────────────────────
+    challenge_keywords = {
+        "修復": "修復了一個 bug",
+        "fix": "修復了一個問題",
+        "遷移": "進行了技術遷移，需要處理相容性問題",
+        "錯誤": "遇到一些錯誤需要排查",
+        "重構": "重構過程需要確保不影響現有功能",
+        "OAuth": "Google OAuth 授權流程有些坑需要踩過",
+        "API": "API 串接過程遇到一些預期外的行為",
+    }
+    challenge = ""
+    all_text  = " ".join(commits) + " " + " ".join(files)
+    for kw, desc in challenge_keywords.items():
+        if kw.lower() in all_text.lower():
+            challenge = desc
+            break
+
+    # ── insight：偵測完成/升級關鍵字 ──────────────────
+    insight_map = {
+        "完成": f"把 {project} 的這塊功能做完之後，整體系統更連貫了",
+        "升級": "升級之後理解了為什麼原本的方式行不通",
+        "新增": "加入這個功能後發現用起來比預期方便很多",
+        "整合": "整合多個系統最難的是資料格式，但統一之後維護就簡單了",
+        "自動": "自動化這個流程之後才發現之前手動有多浪費時間",
+        "遷移": "遷移完成後效能和維護性都提升了",
+    }
+    insight = ""
+    for kw, desc in insight_map.items():
+        if kw in all_text:
+            insight = desc
+            break
+
+    # ── mood：根據 commit 語氣推測 ─────────────────────
+    mood = "💪 有成就感"  # default
+    if any(k in all_text for k in ["修復", "fix", "錯誤", "bug"]):
+        mood = "😅 踩坑"
+    elif any(k in all_text for k in ["完成", "升級", "新增"]):
+        mood = "💪 有成就感"
+    elif any(k in all_text for k in ["遷移", "重構"]):
+        mood = "🌀 燒腦"
+
+    # ── post_angle：從 tags 推測 ───────────────────────
+    tags = session.get("tags", [])
+    if "🔐 OAuth" in tags or "🌐 API" in tags:
+        post_angle = "🔧 工具推薦"
+    elif "📊 Dashboard" in tags:
+        post_angle = "📖 開發日記"
+    elif "⚡ Skill" in tags:
+        post_angle = "📚 學習成長"
+    else:
+        post_angle = "📖 開發日記"
+
+    return {
+        "summary":    summary,
+        "challenge":  challenge,
+        "insight":    insight,
+        "mood":       mood,
+        "post_angle": post_angle,
+    }
+
+
+def _draft_with_claude(session: dict, api_key: str) -> dict:
+    """有 API Key 時用 Claude 萃取結構化欄位"""
+    import anthropic, json as _json
+
+    commits = [_clean_commit(c) for c in session.get("recent_commits", [])[:5]]
+    files   = session.get("changed_files", [])[:8]
+    project = session.get("project_name", "此專案")
+
+    context = f"""專案：{project}
+最近 commits：
+{chr(10).join(f'- {c}' for c in commits)}
+異動檔案：
+{chr(10).join(f'- {f}' for f in files)}"""
+
+    prompt = f"""根據以下 Claude Code 工作紀錄，幫我初步填寫發文素材，用繁體中文，以創作者（設計師/接案者）的口吻：
+
+{context}
+
+請以 JSON 格式回覆，包含這 5 個 key（每個值都是字串）：
+- summary：今天做了什麼（口語，60字以內，不用技術術語，說給朋友聽的語氣）
+- challenge：遇到什麼坑或卡點（具體，如果看不出來就留空字串）
+- insight：最大的突破或領悟（一句話，讀者可以帶走的）
+- mood：心情（從以下選一個：😤 苦戰中 / 😊 順利 / 🤯 震撼 / 😅 踩坑 / 💪 有成就感 / 🌀 燒腦 / 🎉 突破）
+- post_angle：發文角度（從以下選一個：📚 學習成長 / 🔧 工具推薦 / 📖 開發日記 / 🤝 AI 協作）
+
+只回傳 JSON，不要任何說明文字。"""
+
+    client = anthropic.Anthropic(api_key=api_key)
+    resp   = client.messages.create(
+        model="claude-haiku-4-5-20251001",  # 用 Haiku 節省成本
+        max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = resp.content[0].text.strip()
+    # 去掉可能的 markdown code block
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    try:
+        return _json.loads(text)
+    except Exception:
+        return _draft_heuristic(session)
+
+
 def generate_social_post(sessions: list, format_type: str = "threads") -> str:
     """
     生成社群文章（無需 API Key，模板引擎）
