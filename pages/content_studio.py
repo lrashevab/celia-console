@@ -199,7 +199,8 @@ def _render_from_claude_log():
     st.caption("把今天的工作紀錄（commits、突破、心情）直接轉成貼文素材。")
 
     try:
-        sessions = _json.loads(LOG_FILE.read_text()) if LOG_FILE.exists() else []
+        raw = _json.loads(LOG_FILE.read_text()) if LOG_FILE.exists() else []
+        sessions = raw.get("sessions", []) if isinstance(raw, dict) else raw
     except Exception:
         sessions = []
 

@@ -9,9 +9,13 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta
 
+from googleapiclient.discovery import build
+
 from services import google_sheets as gs
-from services.google_auth import is_authenticated
+from services.google_auth import is_authenticated, get_credentials
+from services.api_logger import log_api_call
 from services.chat_handler import parse_command
+from config.settings import ACCOUNTS
 
 
 # ══════════════════════════════════════════════════════
@@ -567,6 +571,106 @@ CONTRACT_BADGE = {
 }
 PRIORITY_CLASS = {"high": "high", "medium": "medium", "low": "low", "scheduled": "scheduled"}
 TODAY = date.today()
+
+
+# ══════════════════════════════════════════════════════
+# Cached API fetchers（TTL 5 分鐘，避免每次 rerun 重打）
+# R2：只讀取 work context，絕不混用 personal token
+# ══════════════════════════════════════════════════════
+
+@st.cache_data(ttl=300)
+def _fetch_calendar_events() -> list[dict]:
+    """讀取工作帳號未來 7 天 Google Calendar 事件"""
+    creds = get_credentials("work")
+    svc   = build("calendar", "v3", credentials=creds)
+    from datetime import timezone
+    now   = datetime.now(timezone.utc).isoformat()
+    end   = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    result = svc.events().list(
+        calendarId="primary",
+        timeMin=now,
+        timeMax=end,
+        singleEvents=True,
+        orderBy="startTime",
+        maxResults=50,
+    ).execute()
+    log_api_call("work", "calendar", "read", "Events", "success")
+    return result.get("items", [])
+
+
+@st.cache_data(ttl=300)
+def _fetch_sheets_preview(spreadsheet_id: str) -> list[list]:
+    """讀取 WORK_SPREADSHEET_ID 第一個 Sheet 前 20 列"""
+    creds  = get_credentials("work")
+    svc    = build("sheets", "v4", credentials=creds)
+    result = svc.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range="A1:Z20",
+    ).execute()
+    log_api_call("work", "sheets", "read", "Sheet1Preview", "success")
+    return result.get("values", [])
+
+
+def _render_calendar_block() -> None:
+    """未來 7 天行事曆（輕量 table 版）"""
+    st.subheader("🗓 未來 7 天排程")
+    try:
+        events = _fetch_calendar_events()
+    except Exception as e:
+        log_api_call("work", "calendar", "read", "Events", "error")
+        st.error(f"Calendar 讀取失敗：{e}")
+        return
+
+    if not events:
+        st.info("本週無排程")
+        return
+
+    rows = []
+    for ev in events:
+        start = ev.get("start", {})
+        dt_str = start.get("dateTime") or start.get("date", "")
+        if "T" in dt_str:
+            dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+            date_col = dt.strftime("%m/%d")
+            time_col = dt.strftime("%H:%M")
+        else:
+            date_col = dt_str[5:]   # MM-DD
+            time_col = "全天"
+        rows.append({
+            "日期":   date_col,
+            "時間":   time_col,
+            "活動":   ev.get("summary", "（無標題）"),
+            "地點":   ev.get("location", "—"),
+        })
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _render_sheets_block() -> None:
+    """WORK_SPREADSHEET_ID 第一 Sheet 前 20 筆預覽"""
+    st.subheader("📊 試算表原始資料預覽")
+    spreadsheet_id = ACCOUNTS["work"].get("spreadsheet_id", "")
+    if not spreadsheet_id:
+        st.warning("請在 .env 設定 WORK_SPREADSHEET_ID")
+        return
+
+    try:
+        values = _fetch_sheets_preview(spreadsheet_id)
+    except Exception as e:
+        log_api_call("work", "sheets", "read", "Sheet1Preview", "error")
+        st.error(f"Sheets 讀取失敗：{e}")
+        return
+
+    if not values:
+        st.info("試算表目前無資料")
+        return
+
+    header = values[0]
+    data   = values[1:]
+    # 補齊短列，避免 DataFrame 欄位不對齊
+    data   = [r + [""] * (len(header) - len(r)) for r in data]
+    df     = pd.DataFrame(data, columns=header)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 def _contract_badge(status: str) -> str:
@@ -1631,8 +1735,13 @@ def render():
         with col_right:
             _render_tasks_with_views(tasks_df, todos_df, clients_df)
 
+        with st.expander("📊 試算表原始資料（前 20 筆）", expanded=False):
+            _render_sheets_block()
+
     # ── Tab 2：行事曆 ────────────────────────────────
     with tab_calendar:
+        _render_calendar_block()
+        st.divider()
         from pages.calendar_page import render as cal_render
         cal_render()
 

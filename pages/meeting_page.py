@@ -7,12 +7,22 @@ pages/meeting_page.py — 會議記錄中心 v3.0
 import streamlit as st
 import pandas as pd
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
+
+import anthropic
+from googleapiclient.discovery import build
 
 from services import google_sheets as gs
+from services.google_auth import get_credentials
+from services.api_logger import log_api_call
 from services.meeting_processor import process_transcript
+from config.settings import ACCOUNTS, ANTHROPIC_API_KEY
 
 TODAY = date.today()
+SHEET_NAME = "會議記錄"
+SHEET_HEADER = ["日期", "會議名稱", "出席者", "決議事項", "下一步行動", "完整記錄"]
+
+WORK_SPREADSHEET_ID = ACCOUNTS["work"]["spreadsheet_id"]
 
 # ══════════════════════════════════════════════════════
 # CSS
@@ -327,6 +337,99 @@ def _show_history(meetings_df: pd.DataFrame):
 
 
 # ══════════════════════════════════════════════════════
+# 從行事曆建立 — 輔助函數
+# ══════════════════════════════════════════════════════
+
+def _ensure_meetings_sheet():
+    """確保 WORK_SPREADSHEET_ID 中有「會議記錄」sheet；若無則建立並寫入 header。"""
+    creds = get_credentials("work")
+    svc   = build("sheets", "v4", credentials=creds)
+    meta  = svc.spreadsheets().get(spreadsheetId=WORK_SPREADSHEET_ID).execute()
+    existing = [s["properties"]["title"] for s in meta.get("sheets", [])]
+
+    if SHEET_NAME not in existing:
+        # 新增 sheet
+        svc.spreadsheets().batchUpdate(
+            spreadsheetId=WORK_SPREADSHEET_ID,
+            body={"requests": [{"addSheet": {"properties": {"title": SHEET_NAME}}}]},
+        ).execute()
+        # 寫入 header
+        svc.spreadsheets().values().update(
+            spreadsheetId=WORK_SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A1",
+            valueInputOption="RAW",
+            body={"values": [SHEET_HEADER]},
+        ).execute()
+        log_api_call("work", "sheets", "create", SHEET_NAME, "success")
+
+
+def _generate_meeting_notes(
+    meeting_name: str,
+    meeting_date: str,
+    meeting_time: str,
+    attendees: str,
+    discussion: str,
+    decisions: str,
+    next_steps: str,
+) -> str:
+    """呼叫 Claude API，將欄位整理成正式會議記錄文字。"""
+    if not ANTHROPIC_API_KEY:
+        raise ValueError("未設定 ANTHROPIC_API_KEY")
+
+    raw_content = f"【討論重點】\n{discussion}\n\n【決議事項】\n{decisions}\n\n【下一步行動】\n{next_steps}"
+
+    prompt = f"""你是一位專業的會議記錄撰寫者。請將以下口語化、未整理的會議內容，
+改寫成正式、結構清晰的會議記錄。
+
+要求：
+- 語氣正式、句子完整、去除口語贅字
+- 討論重點：每項獨立一行，用條列式，句子完整
+- 決議事項：每項加上負責人和deadline（從內容推斷）
+- 下一步行動：格式為「[負責人] [行動] — deadline：[日期]」
+- 若內容有缺漏或不清楚的地方，用括號標註「[待確認]」
+- 輸出語言：繁體中文
+
+會議基本資訊：
+- 會議名稱：{meeting_name}
+- 日期：{meeting_date}
+- 出席者：{attendees}
+
+原始記錄內容：
+{raw_content}"""
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text
+
+
+def _write_to_meetings_sheet(
+    meeting_date: str,
+    meeting_name: str,
+    attendees: str,
+    decisions: str,
+    next_steps: str,
+    full_notes: str,
+):
+    """append 一列到「會議記錄」sheet，若不存在則自動建立。"""
+    _ensure_meetings_sheet()
+    creds = get_credentials("work")
+    svc   = build("sheets", "v4", credentials=creds)
+    row   = [meeting_date, meeting_name, attendees, decisions, next_steps, full_notes]
+    svc.spreadsheets().values().append(
+        spreadsheetId=WORK_SPREADSHEET_ID,
+        range=f"{SHEET_NAME}!A1",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [row]},
+    ).execute()
+    log_api_call("work", "sheets", "write", SHEET_NAME, "success")
+
+
+# ══════════════════════════════════════════════════════
 # 主渲染
 # ══════════════════════════════════════════════════════
 def render():
@@ -346,7 +449,115 @@ def render():
     except Exception:
         pass
 
-    tab_paste, tab_manual, tab_history = st.tabs(["📋 貼入逐字稿", "✏️ 手動填寫", "📁 歷史記錄"])
+    tab_cal, tab_paste, tab_manual, tab_history = st.tabs([
+        "📅 從行事曆建立", "📋 貼入逐字稿", "✏️ 手動填寫", "📁 歷史記錄"
+    ])
+
+    # ── Tab 0：從行事曆建立 ────────────────────────────
+    with tab_cal:
+        # 複用 work_dashboard 的 cache
+        try:
+            from pages.work_dashboard import _fetch_calendar_events
+            events = _fetch_calendar_events()
+        except Exception as e:
+            events = []
+            st.warning(f"無法載入行事曆：{e}")
+
+        if not events:
+            st.info("未來 7 天沒有行事曆事件，或行事曆尚未授權。")
+        else:
+            # 建立選項清單
+            def _evt_label(ev: dict) -> str:
+                start = ev.get("start", {})
+                dt_str = start.get("dateTime", start.get("date", ""))
+                try:
+                    if "T" in dt_str:
+                        dt = datetime.fromisoformat(dt_str)
+                        label_date = dt.strftime("%m/%d %H:%M")
+                    else:
+                        label_date = dt_str[5:]  # MM-DD
+                except Exception:
+                    label_date = dt_str[:10]
+                return f"{label_date}  {ev.get('summary', '（無標題）')}"
+
+            options = {_evt_label(ev): ev for ev in events}
+            selected_label = st.selectbox("選擇行事曆事件", list(options.keys()))
+            selected_ev = options[selected_label]
+
+            # 從事件自動帶入欄位預設值
+            start_raw = selected_ev.get("start", {})
+            dt_raw    = start_raw.get("dateTime", start_raw.get("date", ""))
+            try:
+                if "T" in dt_raw:
+                    dt_obj = datetime.fromisoformat(dt_raw)
+                    auto_date = dt_obj.strftime("%Y/%m/%d")
+                    auto_time = dt_obj.strftime("%H:%M")
+                else:
+                    auto_date = dt_raw.replace("-", "/")
+                    auto_time = ""
+            except Exception:
+                auto_date = TODAY.strftime("%Y/%m/%d")
+                auto_time = ""
+
+            auto_name = selected_ev.get("summary", "")
+
+            st.markdown("---")
+            c1, c2, c3 = st.columns([3, 2, 2])
+            with c1:
+                cal_name = st.text_input("會議名稱", value=auto_name, key="cal_name")
+            with c2:
+                cal_date = st.text_input("日期", value=auto_date, key="cal_date")
+            with c3:
+                cal_time = st.text_input("時間", value=auto_time, key="cal_time")
+
+            cal_attendees  = st.text_input("出席者", placeholder="張總、王經理、Celia", key="cal_att")
+            cal_discussion = st.text_area("討論重點", height=100, placeholder="本次討論的主要議題...", key="cal_disc")
+            cal_decisions  = st.text_area("決議事項", height=80, placeholder="已達成共識的事項...", key="cal_dec")
+            cal_next_steps = st.text_area("下一步行動", height=80, placeholder="誰、做什麼、何時完成...", key="cal_next")
+
+            st.markdown("---")
+            col_gen, col_write = st.columns(2)
+
+            with col_gen:
+                if st.button("🤖 生成會議記錄", type="primary", use_container_width=True, key="cal_gen"):
+                    if not cal_name:
+                        st.warning("請填寫會議名稱。")
+                    else:
+                        with st.spinner("Claude 整理中..."):
+                            try:
+                                notes = _generate_meeting_notes(
+                                    cal_name, cal_date, cal_time,
+                                    cal_attendees, cal_discussion,
+                                    cal_decisions, cal_next_steps,
+                                )
+                                st.session_state["cal_generated_notes"] = notes
+                            except Exception as e:
+                                st.error(f"生成失敗：{e}")
+
+            with col_write:
+                if st.button("💾 寫入 Sheets", use_container_width=True, key="cal_write",
+                             disabled="cal_generated_notes" not in st.session_state):
+                    with st.spinner("寫入 Google Sheets..."):
+                        try:
+                            _write_to_meetings_sheet(
+                                cal_date, cal_name, cal_attendees,
+                                cal_decisions, cal_next_steps,
+                                st.session_state.get("cal_generated_notes", ""),
+                            )
+                            st.success("✅ 已寫入「會議記錄」Sheet！")
+                            # 清除 cache 讓歷史頁重新讀取
+                            for key in ["cal_generated_notes"]:
+                                st.session_state.pop(key, None)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"寫入失敗：{e}")
+
+            if "cal_generated_notes" in st.session_state:
+                st.markdown("**生成結果**")
+                st.code(st.session_state["cal_generated_notes"], language="markdown")
+                if st.button("🔄 重新生成", key="cal_regen"):
+                    st.session_state.pop("cal_generated_notes", None)
+                    st.rerun()
 
     # ── Tab 1：貼入逐字稿 ──────────────────────────────
     with tab_paste:
@@ -371,17 +582,77 @@ def render():
             )
             if st.button("🔍 解析並產出表單", type="primary", use_container_width=True):
                 if raw.strip():
-                    with st.spinner("解析中..."):
+                    # Step 1：結構化解析（供 Sheets 存入 + 模板渲染）
+                    with st.spinner("解析結構中..."):
                         try:
                             result = process_transcript(raw)
                             st.session_state["parsed_meeting"] = result
                         except Exception as e:
                             st.error(f"解析失敗：{e}")
+                            result = None
+
+                    # Step 2：Claude 整理為正式會議記錄文字（供右側顯示）
+                    if result is not None and ANTHROPIC_API_KEY:
+                        with st.spinner("Claude 整理中..."):
+                            try:
+                                attendees_combined = " / ".join(filter(None, [
+                                    result.get("client_attendees", ""),
+                                    result.get("internal_attendees", ""),
+                                ]))
+                                notes = _generate_meeting_notes(
+                                    meeting_name=result.get("meeting_theme", ""),
+                                    meeting_date=result.get("meeting_date", ""),
+                                    meeting_time="",
+                                    attendees=attendees_combined,
+                                    discussion=raw,   # 傳原始逐字稿讓 Claude 整理
+                                    decisions="; ".join(
+                                        a.get("task", "") for a in result.get("action_items", [])
+                                    ),
+                                    next_steps="",
+                                )
+                                st.session_state["paste_claude_notes"] = notes
+                            except Exception as e:
+                                st.session_state.pop("paste_claude_notes", None)
+                                st.warning(f"Claude 整理失敗，僅顯示結構化預覽：{e}")
+                    elif result is not None:
+                        st.session_state.pop("paste_claude_notes", None)
+                        st.warning("未設定 ANTHROPIC_API_KEY，僅顯示規則解析結果。")
                 else:
                     st.warning("請先貼入內容。")
 
         with col_out:
-            if "parsed_meeting" in st.session_state:
+            if "paste_claude_notes" in st.session_state:
+                st.markdown("**Claude 整理結果**")
+                st.code(st.session_state["paste_claude_notes"], language="markdown")
+
+                col_regen, col_clear = st.columns(2)
+                with col_regen:
+                    if st.button("🔄 重新整理", use_container_width=True, key="paste_regen"):
+                        st.session_state.pop("paste_claude_notes", None)
+                        st.rerun()
+                with col_clear:
+                    if st.button("🗑 清除重填", use_container_width=True, key="paste_clear"):
+                        st.session_state.pop("parsed_meeting", None)
+                        st.session_state.pop("paste_claude_notes", None)
+                        st.rerun()
+
+                if "parsed_meeting" in st.session_state:
+                    with st.expander("📋 查看結構化模板", expanded=False):
+                        _render_meeting_doc(st.session_state["parsed_meeting"])
+                        if st.button("💾 存入 Google Sheets", type="primary",
+                                     use_container_width=True, key="paste_save"):
+                            with st.spinner("寫入中..."):
+                                try:
+                                    _save_to_sheets(st.session_state["parsed_meeting"])
+                                    st.success("✅ 已存入 Google Sheets！")
+                                    st.session_state.pop("parsed_meeting", None)
+                                    st.session_state.pop("paste_claude_notes", None)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"寫入失敗：{e}")
+
+            elif "parsed_meeting" in st.session_state:
+                # Claude 未執行（無 API key），降級顯示結構化模板
                 m = st.session_state["parsed_meeting"]
                 _render_meeting_doc(m)
 
@@ -406,7 +677,7 @@ def render():
             background:#f8fafc;border-radius:12px;border:1px dashed #cbd5e1">
   <div style="text-align:center;color:#94a3b8">
     <div style="font-size:2.5rem;margin-bottom:10px">📋</div>
-    <div style="font-size:0.84rem">貼入內容 → 點「解析」<br>表單預覽在這裡</div>
+    <div style="font-size:0.84rem">貼入內容 → 點「解析」<br>Claude 整理結果在這裡</div>
   </div>
 </div>""", unsafe_allow_html=True)
 

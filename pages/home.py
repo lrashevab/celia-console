@@ -12,8 +12,9 @@ from pathlib import Path
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 
-LOG_FILE   = Path(__file__).parent.parent / "data" / "claude_log.json"
-MEMORY_DIR = Path("/root/.claude/projects/-root/memory")
+LOG_FILE      = Path(__file__).parent.parent / "data" / "claude_log.json"
+CLAUDE_LOG_MD = Path(__file__).parent.parent / "data" / "work" / "claude_log.md"
+MEMORY_DIR    = Path("/root/.claude/projects/-root/memory")
 
 HOME_CSS = """
 <style>
@@ -500,6 +501,133 @@ def _char_counter(text: str, limit: int) -> str:
 # ══════════════════════════════════════════════════════
 # 主渲染
 # ══════════════════════════════════════════════════════
+def _render_add_log_entry():
+    """新增今日工作記錄 → append data/work/claude_log.md"""
+    with st.expander("📝 新增今日記錄", expanded=False):
+        task   = st.text_input("任務",         key="log_task",   placeholder="今天做了什麼")
+        output = st.text_input("產出",         key="log_output", placeholder="完成了什麼")
+        tools  = st.text_input("工具",         key="log_tools",  placeholder="Claude Code / Sheets / 手動")
+        note   = st.text_input("備註（選填）", key="log_note",   placeholder="")
+
+        if st.button("寫入記錄", key="log_submit", type="primary"):
+            if not task or not output or not tools:
+                st.warning("任務、產出、工具為必填")
+            else:
+                CLAUDE_LOG_MD.parent.mkdir(parents=True, exist_ok=True)
+                now   = datetime.now()
+                entry = (
+                    f"## {now.strftime('%Y-%m-%d')} {now.strftime('%H:%M')}\n"
+                    f"**任務**：{task}\n"
+                    f"**產出**：{output}\n"
+                    f"**工具**：{tools}\n"
+                    f"**備註**：{note if note else '（無）'}\n"
+                    "---\n"
+                )
+                with open(CLAUDE_LOG_MD, "a", encoding="utf-8") as f:
+                    f.write(entry)
+
+                # 清除 draft cache，讓下次重新生成時用新內容
+                st.session_state.pop("draft_threads", None)
+                st.session_state.pop("draft_xhs", None)
+
+                st.success("已記錄 ✅")
+
+
+def _render_log_draft():
+    """每日記錄自動發文草稿（讀取 data/work/claude_log.md → Anthropic API）"""
+    st.divider()
+    st.subheader("📝 每日記錄自動發文草稿")
+
+    # ── 讀取 log 檔 ──────────────────────────────────────
+    if not CLAUDE_LOG_MD.exists():
+        st.info("今日尚無記錄，請先用 /work-start 開始記錄")
+        return
+
+    log_content = CLAUDE_LOG_MD.read_text(encoding="utf-8").strip()
+    if not log_content:
+        st.info("今日尚無記錄，請先用 /work-start 開始記錄")
+        return
+
+    # ── Log 元資料 ────────────────────────────────────────
+    stat = CLAUDE_LOG_MD.stat()
+    last_mod = datetime.fromtimestamp(stat.st_mtime).strftime("%H:%M:%S")
+    mc1, mc2 = st.columns(2)
+    with mc1: st.caption(f"📄 字數：{len(log_content)} 字")
+    with mc2: st.caption(f"🕐 最後更新：{last_mod}")
+
+    # ── 頂部重新生成按鈕 ──────────────────────────────────
+    if st.button("🔄 重新生成", key="regen_draft_top"):
+        st.session_state.pop("draft_threads", None)
+        st.session_state.pop("draft_xhs", None)
+        st.rerun()
+
+    # ── API 呼叫（未命中 cache 時）───────────────────────
+    if "draft_threads" not in st.session_state or "draft_xhs" not in st.session_state:
+        from config.settings import ANTHROPIC_API_KEY
+        if not ANTHROPIC_API_KEY:
+            st.warning("⚠️ 未設定 ANTHROPIC_API_KEY，請在 .env 填入後重啟")
+            return
+
+        import anthropic
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        prompt_threads = (
+            "以下是我今天用 Claude Code 工作的記錄。請幫我改寫成一則 Threads 貼文。\n"
+            "要求：200字以內、口語化、第一人稱、結尾加3個相關 hashtag（繁體中文標籤）。\n"
+            f"記錄內容：{log_content}"
+        )
+        prompt_xhs = (
+            "以下是我今天用 Claude Code 工作的記錄。請幫我改寫成一則小紅書筆記。\n"
+            "要求：有吸引人的標題、300字以內、分2-3個重點、每點加 emoji、語氣活潑。\n"
+            f"記錄內容：{log_content}"
+        )
+
+        with st.spinner("🤖 Threads 版本生成中..."):
+            try:
+                resp = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=500,
+                    messages=[{"role": "user", "content": prompt_threads}],
+                )
+                st.session_state["draft_threads"] = resp.content[0].text
+            except Exception as e:
+                st.error(f"Threads 生成失敗：{e}")
+                return
+
+        with st.spinner("🤖 小紅書版本生成中..."):
+            try:
+                resp = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=600,
+                    messages=[{"role": "user", "content": prompt_xhs}],
+                )
+                st.session_state["draft_xhs"] = resp.content[0].text
+            except Exception as e:
+                st.error(f"小紅書生成失敗：{e}")
+                return
+
+    # ── 並排顯示草稿 ──────────────────────────────────────
+    col_t, col_x = st.columns(2)
+
+    with col_t:
+        st.markdown("**🧵 Threads 版本**")
+        draft_t = st.session_state.get("draft_threads", "")
+        st.code(draft_t, language=None)
+        st.caption(f"{len(draft_t)} 字")
+
+    with col_x:
+        st.markdown("**📕 小紅書版本**")
+        draft_x = st.session_state.get("draft_xhs", "")
+        st.code(draft_x, language=None)
+        st.caption(f"{len(draft_x)} 字")
+
+    # ── 底部重新生成按鈕 ──────────────────────────────────
+    if st.button("🔄 重新生成", key="regen_draft_bottom"):
+        st.session_state.pop("draft_threads", None)
+        st.session_state.pop("draft_xhs", None)
+        st.rerun()
+
+
 def render():
     st.markdown(HOME_CSS, unsafe_allow_html=True)
     st.title("🤖 Claude Code 指揮中心")
@@ -1003,4 +1131,10 @@ def render():
                 save_sessions(sessions)
                 st.success("已標記！")
                 st.rerun()
+
+    # ════════════════ 新增今日記錄 ════════════════════
+    _render_add_log_entry()
+
+    # ════════════════ 每日記錄發文草稿 ════════════════
+    _render_log_draft()
 

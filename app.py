@@ -25,6 +25,8 @@ with open("static/style.css") as f:
 PAGES = [
     ("🤖", "Claude 指揮中心", "claude"),
     ("🏢", "工作指揮室",      "work"),
+    ("📝", "會議記錄",        "meeting"),   # 工作 context — Phase 2 鎖定
+    ("📅", "行事曆",          "calendar"),  # 工作 context — Phase 2 鎖定
     ("🏠", "個人生活",        "personal"),
     ("📱", "內容工作室",      "studio"),
 ]
@@ -62,7 +64,7 @@ with st.sidebar:
                 st.rerun()
 
     # ── 動態注入 active 按鈕樣式 ──────────────────────────
-    # 側邊欄結構：title(1) + divider(2) + nav-label(3) + 4 個 nav buttons(4–7)
+    # 側邊欄結構：title(1) + divider(2) + nav-label(3) + 6 個 nav buttons(4–9)
     # nth-child offset = 3 + 1-based index
     _active_idx = next(i for i, (_, _, pid) in enumerate(PAGES)
                        if pid == st.session_state.current_page)
@@ -112,6 +114,12 @@ if mode == "claude":
 elif mode == "work":
     from pages.work_dashboard import render as work_render
     work_render()
+elif mode == "meeting":
+    from pages.meeting_page import render as meeting_render
+    meeting_render()
+elif mode == "calendar":
+    from pages.calendar_page import render as calendar_render
+    calendar_render()
 elif mode == "studio":
     from pages.content_studio import render as studio_render
     studio_render()
