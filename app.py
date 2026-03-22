@@ -52,16 +52,6 @@ with st.sidebar:
     st.markdown('<div style="font-size:0.68rem;font-weight:700;color:#475569;letter-spacing:0.08em;margin-bottom:8px">導覽</div>', unsafe_allow_html=True)
 
     for icon, label, page_id in PAGES:
-        is_active = st.session_state.current_page == page_id
-        btn_style = (
-            "background:#1e40af;color:#fff;border:none;border-radius:10px;"
-            "padding:10px 14px;width:100%;text-align:left;font-size:0.9rem;"
-            "font-weight:700;cursor:pointer;margin-bottom:4px;display:block"
-        ) if is_active else (
-            "background:transparent;color:#94a3b8;border:none;border-radius:10px;"
-            "padding:10px 14px;width:100%;text-align:left;font-size:0.9rem;"
-            "font-weight:500;cursor:pointer;margin-bottom:4px;display:block"
-        )
         if st.button(f"{icon}  {label}", key=f"nav_{page_id}", use_container_width=True):
             prev = st.session_state.current_page
             if prev != page_id:
@@ -70,6 +60,19 @@ with st.sidebar:
                     del st.session_state[k]
                 st.session_state.current_page = page_id
                 st.rerun()
+
+    # ── 動態注入 active 按鈕樣式 ──────────────────────────
+    # 側邊欄結構：title(1) + divider(2) + nav-label(3) + 4 個 nav buttons(4–7)
+    # nth-child offset = 3 + 1-based index
+    _active_idx = next(i for i, (_, _, pid) in enumerate(PAGES)
+                       if pid == st.session_state.current_page)
+    st.markdown(f"""<style>
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:nth-child({_active_idx + 4}) [data-testid="stButton"] > button {{
+    background: #1e40af !important;
+    color: #fff !important;
+    font-weight: 700 !important;
+}}
+</style>""", unsafe_allow_html=True)
 
     st.divider()
 

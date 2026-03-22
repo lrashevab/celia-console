@@ -26,29 +26,27 @@ section[data-testid="stSidebar"] h2 {
 }
 section[data-testid="stSidebar"] .stDivider { border-color: #2d3748; }
 
-/* ── 導覽按鈕 ── */
-.nav-btn {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 10px 14px;
-    border-radius: 10px;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: #94a3b8;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-    margin-bottom: 4px;
-    text-decoration: none;
+/* ── 導覽按鈕（sidebar st.button）── */
+section[data-testid="stSidebar"] [data-testid="stButton"] > button {
+    background: transparent !important;
+    color: #94a3b8 !important;
+    border: none !important;
+    border-radius: 10px !important;
+    font-size: 0.9rem !important;
+    font-weight: 500 !important;
+    text-align: left !important;
+    transition: background 0.15s, color 0.15s !important;
 }
-.nav-btn:hover { background: #1e293b; color: #f1f5f9; }
-.nav-btn.active {
-    background: #1e40af;
+section[data-testid="stSidebar"] [data-testid="stButton"] > button:hover {
+    background: #1e293b !important;
+    color: #f1f5f9 !important;
+}
+/* active 狀態由 app.py 根據當前頁面動態注入 nth-child 覆寫 */
+section[data-testid="stSidebar"] [data-testid="stButton"] > button.nav-active {
+    background: #1e40af !important;
     color: #fff !important;
-    font-weight: 700;
+    font-weight: 700 !important;
 }
-.nav-icon { font-size: 1.1rem; width: 22px; text-align: center; }
 
 /* ── 帳號狀態 ── */
 .acct-status {
