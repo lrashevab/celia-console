@@ -149,8 +149,12 @@ with st.sidebar:
         p_icon = "🟢" if pers_ok else "🔴"
         st.markdown(f'<div class="acct-status">{w_icon} 工作帳號</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="acct-status">{p_icon} 個人帳號</div>', unsafe_allow_html=True)
-    except Exception:
-        st.markdown('<div class="acct-status">⏳ 讀取中...</div>', unsafe_allow_html=True)
+    except ImportError:
+        st.markdown('<div class="acct-status">⚠️ 服務未設定</div>', unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.markdown('<div class="acct-status">🔴 Token 不存在</div>', unsafe_allow_html=True)
+    except Exception as e:
+        st.markdown(f'<div class="acct-status">❌ 讀取失敗: {type(e).__name__}</div>', unsafe_allow_html=True)
 
     st.divider()
 
