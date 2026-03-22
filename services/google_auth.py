@@ -11,6 +11,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 from config.settings import ACCOUNTS, COMBINED_SCOPES
+from services.api_logger import log_api_call
 
 
 def get_credentials(account: str = "work") -> Credentials:
@@ -51,12 +52,16 @@ def get_credentials(account: str = "work") -> Credentials:
 
 def get_sheets_service(account: str = "work"):
     """回傳 Google Sheets API service 物件"""
-    return build("sheets", "v4", credentials=get_credentials(account))
+    svc = build("sheets", "v4", credentials=get_credentials(account))
+    log_api_call(account, "sheets", "build", "SheetsService", "success")
+    return svc
 
 
 def get_calendar_service(account: str = "work"):
     """回傳 Google Calendar API service 物件"""
-    return build("calendar", "v3", credentials=get_credentials(account))
+    svc = build("calendar", "v3", credentials=get_credentials(account))
+    log_api_call(account, "calendar", "build", "CalendarService", "success")
+    return svc
 
 
 def is_authenticated(account: str) -> bool:
