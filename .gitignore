@@ -6,6 +6,7 @@ config/credentials_work.json
 
 # 個人隱私資料
 data/personal/
+data/work/
 data/claude_log.json
 
 # Python
@@ -21,3 +22,4 @@ venv/
 # 系統
 .DS_Store
 *.log
+.claude/settings.local.json

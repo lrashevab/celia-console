@@ -710,7 +710,8 @@ def _render_tasks(tasks_df: pd.DataFrame):
             assigned = row.get("assigned_to", "") or "—"
             account  = row.get("_account", "work")
             item_id  = row.get("id", "")
-            is_editing = st.session_state.get(f"editing_{item_id}", False)
+            uniq_key = f"{account}_{item_id}"
+            is_editing = st.session_state.get(f"editing_{uniq_key}", False)
 
             col_card, col_btn = st.columns([9, 1])
             with col_card:
@@ -726,8 +727,8 @@ def _render_tasks(tasks_df: pd.DataFrame):
 """, unsafe_allow_html=True)
             with col_btn:
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("✏️", key=f"edit_btn_task_{item_id}", help="編輯", use_container_width=True):
-                    st.session_state[f"editing_{item_id}"] = not is_editing
+                if st.button("✏️", key=f"edit_btn_task_{uniq_key}", help="編輯", use_container_width=True):
+                    st.session_state[f"editing_{uniq_key}"] = not is_editing
                     st.rerun()
 
             if is_editing:
@@ -768,7 +769,8 @@ def _render_todos(todos_df: pd.DataFrame):
         client_str = f" · {row.get('client','')}" if row.get("client") else ""
         account = row.get("_account", "work")
         item_id = row.get("id", "")
-        is_editing = st.session_state.get(f"editing_{item_id}", False)
+        uniq_key = f"{account}_{item_id}"
+        is_editing = st.session_state.get(f"editing_{uniq_key}", False)
 
         col_card, col_btn = st.columns([9, 1])
         with col_card:
@@ -782,8 +784,8 @@ def _render_todos(todos_df: pd.DataFrame):
 """, unsafe_allow_html=True)
         with col_btn:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("✏️", key=f"edit_btn_todo_{item_id}", help="編輯", use_container_width=True):
-                st.session_state[f"editing_{item_id}"] = not is_editing
+            if st.button("✏️", key=f"edit_btn_todo_{uniq_key}", help="編輯", use_container_width=True):
+                st.session_state[f"editing_{uniq_key}"] = not is_editing
                 st.rerun()
 
         if is_editing:

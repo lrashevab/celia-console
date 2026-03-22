@@ -299,7 +299,13 @@ def _render_xhs_pipeline():
             st.success(f"✅ 找到 {art_count} 篇參考資料、{img_count} 張圖片")
             with st.expander("查看搜尋結果"):
                 for a in research["articles"][:4]:
-                    st.markdown(f"- **{a['title']}**  \n  {a['content'][:80]}...")
+                    url = a.get('url', '')
+                    title = a.get('title', '無標題')
+                    snippet = a.get('content', '')[:100]
+                    if url:
+                        st.markdown(f"- **[{title}]({url})**  \n  {snippet}...")
+                    else:
+                        st.markdown(f"- **{title}**  \n  {snippet}...")
         else:
             st.info("無搜尋結果，將基於主題直接生成")
 
@@ -516,8 +522,8 @@ def render():
 
     st.divider()
 
-    tab_projects, tab_timeline, tab_content, tab_xhs = st.tabs([
-        "📁 進行中專案", "📅 每日活動紀錄", "✍️ 日誌發文", "🔥 爆款生成器",
+    tab_projects, tab_timeline = st.tabs([
+        "📁 進行中專案", "📅 每日活動紀錄",
     ])
 
     # ════════════════ Tab 1：專案總覽 ════════════════
@@ -577,6 +583,90 @@ def render():
 
             for day in sorted(by_date.keys(), reverse=True):
                 st.markdown(f"### 📅 {day}")
+
+                # ── 今日日記總結 ─────────────────────────────
+                day_sessions = by_date[day]
+                diary_key    = f"diary_{day}"
+                diary_saved_key = f"diary_saved_{day}"
+
+                with st.expander("📔 今日總結", expanded=(day == today_str)):
+                    existing_diary = st.session_state.get(diary_key, "")
+
+                    if not existing_diary:
+                        # 嘗試讀已存的日記檔
+                        from config.settings import DIARY_PATH
+                        diary_file = DIARY_PATH / f"{day}.md"
+                        if diary_file.exists():
+                            raw = diary_file.read_text(encoding="utf-8")
+                            # 只取 AI 總結區塊（若存在），否則顯示全文
+                            if "<!-- ai_summary -->" in raw:
+                                start = raw.find("<!-- ai_summary -->") + len("<!-- ai_summary -->")
+                                end   = raw.find("<!-- /ai_summary -->")
+                                existing_diary = raw[start:end].strip() if end > start else ""
+                            st.session_state[diary_key] = existing_diary
+
+                    col_btn, col_status = st.columns([2, 5])
+                    with col_btn:
+                        gen_btn = st.button("✨ 幫我寫今日日記", key=f"gen_diary_{day}")
+                    with col_status:
+                        if st.session_state.get(diary_saved_key):
+                            st.success("✅ 已儲存至本地日記")
+
+                    if gen_btn:
+                        with st.spinner("生成中..."):
+                            from services.content_generator import generate_daily_diary
+                            result = generate_daily_diary(day_sessions, day)
+                        if result:
+                            st.session_state[diary_key] = result
+                            st.session_state[diary_saved_key] = False
+                            st.rerun()
+
+                    diary_text = st.text_area(
+                        "日記內容（可自由編輯）",
+                        value=st.session_state.get(diary_key, ""),
+                        height=150,
+                        placeholder="按「✨ 幫我寫今日日記」自動生成，或直接在這裡手寫。",
+                        key=f"diary_text_{day}",
+                        label_visibility="collapsed",
+                    )
+
+                    col_save, col_send = st.columns([2, 3])
+                    with col_save:
+                        if st.button("💾 存入日記", key=f"save_diary_{day}"):
+                            if diary_text.strip():
+                                from config.settings import DIARY_PATH
+                                diary_file = DIARY_PATH / f"{day}.md"
+                                # 保留原有日記內容，AI 總結用標記包起來
+                                original = diary_file.read_text(encoding="utf-8") if diary_file.exists() else ""
+                                if "<!-- ai_summary -->" in original:
+                                    # 替換已有的 AI 總結
+                                    pre  = original[:original.find("<!-- ai_summary -->")]
+                                    post_start = original.find("<!-- /ai_summary -->") + len("<!-- /ai_summary -->")
+                                    post = original[post_start:]
+                                    new_content = f"{pre}<!-- ai_summary -->\n{diary_text}\n<!-- /ai_summary -->{post}"
+                                else:
+                                    # 附加到現有日記後面
+                                    sep = "\n\n---\n" if original.strip() else ""
+                                    new_content = f"{original}{sep}<!-- ai_summary -->\n{diary_text}\n<!-- /ai_summary -->"
+                                diary_file.write_text(new_content.strip(), encoding="utf-8")
+                                st.session_state[diary_key] = diary_text
+                                st.session_state[diary_saved_key] = True
+                                st.rerun()
+                    with col_send:
+                        if diary_text.strip() and st.button("📱 傳到內容工作室", key=f"send_studio_{day}"):
+                            from services.content_db import add_idea
+                            idea_id = add_idea(
+                                title=f"{day} 工作日記",
+                                content=diary_text.strip(),
+                                category="工作",
+                                source="Claude日誌",
+                                tags=list({s.get("project_name","") for s in day_sessions if s.get("project_name")}),
+                            )
+                            st.success(f"✅ 已傳至內容工作室素材庫（{idea_id}）→ 左側選「📱 內容工作室」繼續")
+
+
+                st.divider()
+
                 for idx, s in enumerate(by_date[day]):
                     sid = s.get("id", f"{day}_{idx}")
 
@@ -729,7 +819,7 @@ def render():
                             save_sessions(sessions)
 
     # ════════════════ Tab 3：生成文章 ════════════════
-    with tab_content:
+    if False:  # 已移至內容工作室
         st.subheader("✍️ 生成 Threads / 小紅書文章")
 
         available_dates = sorted(
@@ -914,6 +1004,3 @@ def render():
                 st.success("已標記！")
                 st.rerun()
 
-    # ════════════════ Tab 4：爆款生成器 ══════════════
-    with tab_xhs:
-        _render_xhs_pipeline()

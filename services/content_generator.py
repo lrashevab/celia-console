@@ -395,6 +395,95 @@ def _draft_with_claude(session: dict, api_key: str) -> dict:
         return _draft_heuristic(session)
 
 
+def generate_daily_diary(sessions: list, date_str: str = "") -> str:
+    """
+    生成日記式每日總結（第一人稱、口語、有情緒）
+    整合當天所有 sessions → 一段連貫的日記
+    優先用 LLM；fallback 用模板拼接
+    """
+    if not sessions:
+        return ""
+
+    # 嘗試 LLM
+    try:
+        import os
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            from config.settings import ANTHROPIC_API_KEY as cfg_key
+            api_key = cfg_key
+        gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        if not gemini_key:
+            from config.settings import GEMINI_API_KEY as gem_key
+            gemini_key = gem_key
+        if api_key or gemini_key:
+            return _diary_with_llm(sessions, date_str)
+    except Exception:
+        pass
+
+    return _diary_heuristic(sessions, date_str)
+
+
+def _diary_with_llm(sessions: list, date_str: str) -> str:
+    """用 LLM 生成日記，Gemini 優先 fallback Claude"""
+    from services.llm_client import generate
+
+    parts = []
+    for s in sessions:
+        lines = [f"專案：{s.get('project_name', '未知')}"]
+        commits = [_clean_commit(c) for c in s.get("recent_commits", [])[:3]]
+        if commits:
+            lines.append("commits：" + "、".join(commits))
+        if s.get("summary"):
+            lines.append(f"做了什麼：{s['summary']}")
+        if s.get("challenge"):
+            lines.append(f"遇到的坑：{s['challenge']}")
+        if s.get("insight"):
+            lines.append(f"突破：{s['insight']}")
+        if s.get("mood"):
+            lines.append(f"心情：{s['mood']}")
+        parts.append("\n".join(lines))
+
+    context = "\n\n---\n\n".join(parts)
+    date_hint = f"（{date_str}）" if date_str else ""
+
+    system = """你是 Celia 的私人助理，負責幫她寫工作日記。
+寫作規則：
+1. 第一人稱、口語化繁體中文，讀起來像 Celia 自己在寫
+2. 150-220 字，一段連貫的散文，不要條列式
+3. 要有：今天主要做了什麼 → 遇到什麼 → 有什麼感受或收穫
+4. 情緒要真實，可以有挫折感、也可以有成就感，不要假裝都很順
+5. 不要說「今天用 Claude Code」這種贅語，直接說做了什麼
+6. 結尾可以是一個小感悟，或對明天的期待，自然收尾就好"""
+
+    prompt = f"根據以下今天{date_hint}的工作紀錄，幫我寫一段日記：\n\n{context}"
+
+    try:
+        return generate(system, prompt, max_tokens=500)
+    except Exception:
+        return _diary_heuristic(sessions, date_str)
+
+
+def _diary_heuristic(sessions: list, date_str: str) -> str:
+    """無 LLM 時的模板日記（確保一定有東西）"""
+    projects = list({s.get("project_name", "") for s in sessions if s.get("project_name")})
+    all_commits = []
+    for s in sessions:
+        all_commits.extend([_clean_commit(c) for c in s.get("recent_commits", [])[:2]])
+    summaries = [s.get("summary") for s in sessions if s.get("summary")]
+    insights  = [s.get("insight") for s in sessions if s.get("insight")]
+    moods     = [s.get("mood") for s in sessions if s.get("mood")]
+
+    proj_str = " 和 ".join(projects[:2]) if projects else "幾個專案"
+    what = summaries[0] if summaries else (all_commits[0] if all_commits else f"推進了 {proj_str} 的進度")
+    mood_str = f"心情{moods[0].split(' ')[-1]}，" if moods else ""
+    insight_str = f"今天最大的收穫是：{insights[0]}。" if insights else ""
+
+    n = len(sessions)
+    session_str = f"今天跑了 {n} 個工作階段，" if n > 1 else "今天，"
+
+    return f"{session_str}主要在做{proj_str}。{what}。{insight_str}{mood_str}雖然不是每一步都順，但有在前進就好。"
+
+
 def generate_social_post(sessions: list, format_type: str = "threads") -> str:
     """
     生成社群文章（無需 API Key，模板引擎）

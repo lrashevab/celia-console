@@ -92,6 +92,7 @@ PAGES = [
     ("🤖", "Claude 指揮中心", "claude"),
     ("🏢", "工作指揮室",      "work"),
     ("🏠", "個人生活",        "personal"),
+    ("📱", "內容工作室",      "studio"),
 ]
 
 # 初始化當前頁面
@@ -170,6 +171,9 @@ if mode == "claude":
 elif mode == "work":
     from pages.work_dashboard import render as work_render
     work_render()
+elif mode == "studio":
+    from pages.content_studio import render as studio_render
+    studio_render()
 else:
     from pages.personal_dashboard import render as personal_render
     personal_render()
