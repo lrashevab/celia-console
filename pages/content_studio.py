@@ -93,7 +93,7 @@ def _render_ideas():
     st.subheader("💡 素材庫")
 
     # ── 快速新增 ──────────────────────────────────────
-    with st.expander("➕ 新增靈感", expanded=st.session_state.get("idea_form_open", False)):
+    with st.expander("➕ 新增靈感", expanded=st.session_state.get("ctx_idea_form_open", False)):
         c1, c2 = st.columns([3, 1])
         with c1:
             new_title = st.text_input("靈感標題 *", placeholder="一句話描述這個想法", key="new_idea_title")
@@ -115,7 +115,7 @@ def _render_ideas():
                 idea_id = add_idea(new_title.strip(), new_content.strip(),
                                    new_cat, new_source, tags)
                 st.success(f"✅ 靈感已儲存（{idea_id}）")
-                st.session_state["idea_form_open"] = False
+                st.session_state["ctx_idea_form_open"] = False
                 st.rerun()
             else:
                 st.warning("請填寫標題")
@@ -170,10 +170,10 @@ def _render_ideas():
                 st.markdown("<br><br>", unsafe_allow_html=True)
                 # 生成草稿按鈕
                 if st.button("✍️ 生成草稿", key=f"draft_from_{iid}", use_container_width=True):
-                    st.session_state["generate_draft_idea_id"] = iid
-                    st.session_state["generate_draft_idea_title"] = idea["title"]
-                    st.session_state["generate_draft_idea_content"] = idea.get("content", "")
-                    st.session_state["goto_tab"] = "draft"
+                    st.session_state["ctx_generate_draft_idea_id"] = iid
+                    st.session_state["ctx_generate_draft_idea_title"] = idea["title"]
+                    st.session_state["ctx_generate_draft_idea_content"] = idea.get("content", "")
+                    st.session_state["ctx_goto_tab"] = "draft"
                     st.rerun()
 
                 # 狀態快速切換
@@ -233,11 +233,11 @@ def _render_from_claude_log():
             platform="threads" if "Threads" in fmt else "xhs",
         )
         st.success(f"✅ 草稿已儲存（{draft_id}），到下方草稿列表查看。")
-        st.session_state["log_generated_content"] = content
+        st.session_state["ctx_log_generated_content"] = content
         st.rerun()
 
-    if st.session_state.get("log_generated_content"):
-        st.text_area("生成結果（可複製）", value=st.session_state["log_generated_content"],
+    if st.session_state.get("ctx_log_generated_content"):
+        st.text_area("生成結果（可複製）", value=st.session_state["ctx_log_generated_content"],
                      height=260, key="log_result_area")
 
 
@@ -361,9 +361,9 @@ def _render_xhs_pipeline():
 def _render_drafts():
     st.subheader("✍️ 草稿工作台")
 
-    auto_idea_id      = st.session_state.pop("generate_draft_idea_id", None)
-    auto_idea_title   = st.session_state.pop("generate_draft_idea_title", "")
-    auto_idea_content = st.session_state.pop("generate_draft_idea_content", "")
+    auto_idea_id      = st.session_state.pop("ctx_generate_draft_idea_id", None)
+    auto_idea_title   = st.session_state.pop("ctx_generate_draft_idea_title", "")
+    auto_idea_content = st.session_state.pop("ctx_generate_draft_idea_content", "")
 
     src_tab_idea, src_tab_log, src_tab_boom = st.tabs([
         "💡 從靈感/主題生成", "📅 從 Claude 日誌生成", "🔥 爆款 Pipeline"
@@ -550,7 +550,7 @@ def _render_calendar():
         view = st.radio("檢視", ["本週", "下週", "本月"], horizontal=True, key="cal_view")
     with c2:
         if st.button("➕ 快速排程", key="quick_sched"):
-            st.session_state["goto_tab"] = "draft"
+            st.session_state["ctx_goto_tab"] = "draft"
 
     if view == "本週":
         start = week_start
@@ -713,9 +713,9 @@ def render():
 """, unsafe_allow_html=True)
 
     # Tab 跳轉（從素材庫點「生成草稿」時）
-    default_tab = 1 if st.session_state.get("goto_tab") == "draft" else 0
-    if "goto_tab" in st.session_state:
-        del st.session_state["goto_tab"]
+    default_tab = 1 if st.session_state.get("ctx_goto_tab") == "draft" else 0
+    if "ctx_goto_tab" in st.session_state:
+        del st.session_state["ctx_goto_tab"]
 
     tab_ideas, tab_drafts, tab_cal, tab_perf = st.tabs([
         "💡 素材庫", "✍️ 草稿工作台", "📅 內容日曆", "📊 成效追蹤"

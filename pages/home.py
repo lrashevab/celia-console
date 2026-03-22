@@ -586,8 +586,8 @@ def render():
 
                 # ── 今日日記總結 ─────────────────────────────
                 day_sessions = by_date[day]
-                diary_key    = f"diary_{day}"
-                diary_saved_key = f"diary_saved_{day}"
+                diary_key = f"ctx_diary_{day}"
+                diary_saved_key = f"ctx_diary_saved_{day}"
 
                 with st.expander("📔 今日總結", expanded=(day == today_str)):
                     existing_diary = st.session_state.get(diary_key, "")
@@ -694,7 +694,7 @@ def render():
                         st.divider()
 
                         # ── AI 初稿按鈕 ──────────────────────────
-                        draft_key = f"drafted_{sid}_{idx}"
+                        draft_key = f"ctx_drafted_{sid}_{idx}"
                         col_ai, col_hint = st.columns([2, 5])
                         with col_ai:
                             if st.button("🤖 AI 幫我初稿", key=f"draft_btn_{sid}_{idx}",

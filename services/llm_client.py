@@ -17,7 +17,7 @@ import os
 from typing import Generator
 
 # ── 預設模型 ────────────────────────────────────────
-DEFAULT_GEMINI    = "gemini-2.0-flash"
+DEFAULT_GEMINI    = "gemini-2.5-flash-lite"
 DEFAULT_ANTHROPIC = "claude-sonnet-4-6"
 
 
@@ -102,17 +102,16 @@ def _gemini_stream(
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=api_key)
+    client   = genai.Client(api_key=api_key)
     combined = f"{system}\n\n---\n\n{user}" if system else user
 
-    with client.models.generate_content_stream(
+    for chunk in client.models.generate_content_stream(
         model=DEFAULT_GEMINI,
         contents=combined,
         config=types.GenerateContentConfig(max_output_tokens=max_tokens),
-    ) as stream:
-        for chunk in stream:
-            if chunk.text:
-                yield chunk.text
+    ):
+        if chunk.text:
+            yield chunk.text
 
 
 # ── Anthropic streaming ──────────────────────────────

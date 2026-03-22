@@ -129,10 +129,10 @@ with st.sidebar:
             "font-weight:500;cursor:pointer;margin-bottom:4px;display:block"
         )
         if st.button(f"{icon}  {label}", key=f"nav_{page_id}", use_container_width=True):
-            # 切換時清除舊 session 資料
             prev = st.session_state.current_page
             if prev != page_id:
-                for k in [k for k in st.session_state if k not in ("current_page",)]:
+                # 只清除 ctx_ 開頭的 context 資料，保留 ui_ 開頭的 UI 偏好與 widget 狀態
+                for k in [k for k in st.session_state if k.startswith("ctx_")]:
                     del st.session_state[k]
                 st.session_state.current_page = page_id
                 st.rerun()
