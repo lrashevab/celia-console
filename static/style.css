@@ -1,0 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+
+/* ── 隱藏 Streamlit 預設頁面導覽（pages/ 自動生成的連結） ── */
+[data-testid="stSidebarNav"] { display: none !important; }
+/* 隱藏頂部 Deploy 按鈕與 header */
+header[data-testid="stHeader"] { display: none !important; }
+#MainMenu { display: none !important; }
+footer { display: none !important; }
+
+/* ── 側邊欄底色 ── */
+section[data-testid="stSidebar"] {
+    background: #0f172a;
+    padding-top: 0 !important;
+}
+section[data-testid="stSidebar"] > div:first-child {
+    padding-top: 20px;
+}
+section[data-testid="stSidebar"] * {
+    color: #cbd5e1 !important;
+}
+section[data-testid="stSidebar"] h2 {
+    color: #f8fafc !important;
+    font-weight: 700;
+}
+section[data-testid="stSidebar"] .stDivider { border-color: #2d3748; }
+
+/* ── 導覽按鈕 ── */
+.nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    margin-bottom: 4px;
+    text-decoration: none;
+}
+.nav-btn:hover { background: #1e293b; color: #f1f5f9; }
+.nav-btn.active {
+    background: #1e40af;
+    color: #fff !important;
+    font-weight: 700;
+}
+.nav-icon { font-size: 1.1rem; width: 22px; text-align: center; }
+
+/* ── 帳號狀態 ── */
+.acct-status {
+    font-size: 0.78rem;
+    padding: 3px 0;
+    color: #64748b;
+}
+
+/* ── 全域元件 ── */
+[data-testid="stMetricValue"] { font-size: 2rem !important; }
+[data-testid="stExpander"] { border: 1px solid #e2e8f0; border-radius: 14px; }
+.stButton > button { border-radius: 10px; font-weight: 600; font-size: 0.85rem; }
+[data-testid="stChatInput"] { border-radius: 16px !important; }
